@@ -1,15 +1,16 @@
-from flask import Blueprint, jsonify, request
-from flask_cors import cross_origin
+from flask import Blueprint
 
-api_bp = Blueprint('api', __name__)
+def create_seo_bp(seo_service):
+    bp = Blueprint('seo', __name__, url_prefix='/api/v1/seo')
+    @bp.route('/analyze', methods=['GET'])
+    def analyze():
+        url = 'http://example.com'  # Mock
+        return seo_service.analyze(url, {'title': 'Test', 'description': 'Test desc', 'og:title': 'Test'})
+    return bp
 
-@api_bp.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({'status': 'healthy', 'message': 'API is running'}), 200
-
-@api_bp.route('/status', methods=['GET'])
-def status():
-    return jsonify({
-        'version': '1.0.0',
-        'environment': 'development'
-    }), 200
+def create_a11y_bp(a11y_service):
+    bp = Blueprint('accessibility', __name__, url_prefix='/api/v1/accessibility')
+    @bp.route('/audit', methods=['GET'])
+    def audit():
+        return a11y_service.check_wcag('http://example.com', '<html></html>')
+    return bp
