@@ -1,0 +1,5 @@
+# N-Mod EXT ignore file
+.nmodignore
+backend\app\routes\__pycache__
+
+backend\app\errors\__pycache__
