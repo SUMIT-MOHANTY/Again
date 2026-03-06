@@ -1,0 +1,1 @@
+#!/usr/bin/env bash\n# Placeholder alert script - replace with email/Slack integration later\nMESSAGE=$1\necho "ALERT: $MESSAGE"\n# Reminder: make this script executable\n# chmod +x $(basename "$0")\n

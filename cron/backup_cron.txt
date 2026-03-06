@@ -1,0 +1,1 @@
+0 2 * * * /bin/bash /workspace/scripts/backup_postgres.sh >> /var/log/backup_postgres.log 2>&1\n0 2 * * * /bin/bash /workspace/scripts/cleanup_backups.sh >> /var/log/cleanup_backups.log 2>&1\n
