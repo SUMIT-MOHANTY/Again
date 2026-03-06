@@ -1,0 +1,1 @@
+FROM node:20-alpine AS builder\nWORKDIR /app\nCOPY frontend/package*.json ./\nRUN npm ci\nCOPY frontend/ ./\nRUN npm run build\n\nFROM nginx:alpine AS runtime\nCOPY --from=builder /app/dist /usr/share/nginx/html\nEXPOSE 80\nCMD ["nginx", "-g", "daemon off;"]\n
