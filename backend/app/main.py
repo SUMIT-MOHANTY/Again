@@ -1,6 +1,6 @@
-from app import create_app
+from fastapi import FastAPI
+from .config import settings
+from .api.router import api_router
 
-app = create_app()
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+app = FastAPI(title=settings.PROJECT_NAME)
+app.include_router(api_router)

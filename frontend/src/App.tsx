@@ -1,27 +1,20 @@
-import { PortfolioProvider, usePortfolio } from './context/PortfolioContext';
-import { SearchBar } from './components/SearchBar';
-import { FilterPanel } from './components/FilterPanel';
-import { PortfolioGrid } from './components/PortfolioGrid';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import Home from './pages/Home';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import Layout from './components/Layout';
 
-const CATEGORIES = ['Web Development', 'Mobile App', 'Data Science', 'DevOps'];
-const TECHNOLOGIES = ['React', 'Python', 'TypeScript', 'PostgreSQL', 'Docker', 'AWS', 'Node.js', 'Vue.js'];
-
-function AppContent() {
-  const { items, loading, setSearchQuery, setFilters } = usePortfolio();
+function App() {
+  const isAuth = false; // placeholder auth state
   return (
-    <div className="app">
-      <h1>Portfolio Projects</h1>
-      <SearchBar onSearch={setSearchQuery} />
-      <FilterPanel categories={CATEGORIES} technologies={TECHNOLOGIES} onFilterChange={setFilters} />
-      {loading ? <p>Loading...</p> : <PortfolioGrid items={items} />}
-    </div>
+    <Layout>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/dashboard" element={isAuth ? <Dashboard /> : <Navigate to="/login" replace />} />
+      </Routes>
+    </Layout>
   );
 }
 
-export default function App() {
-  return (
-    <PortfolioProvider>
-      <AppContent />
-    </PortfolioProvider>
-  );
-}
+export default App;
