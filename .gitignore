@@ -1,7 +1,45 @@
-# N-Mod EXT ignore file
-.nmodignore
-backend\app\routes\__pycache__
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+*.pyo
+*.pyd
 
-backend\app\errors\__pycache__
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
 
-bacend/__pycache__
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
