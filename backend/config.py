@@ -1,11 +1,13 @@
-import os
-from dotenv import load_dotenv
+from pydantic import BaseSettings, Field
 
-load_dotenv()
+class Config(BaseSettings):
+    RETRY_COUNT: int = Field(3, env="RETRY_COUNT")
+    RETRY_DELAY: float = Field(0.2, env="RETRY_DELAY")
+    CIRCUIT_BREAKER_FAIL_MAX: int = Field(5, env="CIRCUIT_BREAKER_FAIL_MAX")
+    CIRCUIT_BREAKER_RESET_TIMEOUT: int = Field(60, env="CIRCUIT_BREAKER_RESET_TIMEOUT")
 
-class Config:
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key')
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'postgresql://localhost/a11y_db')
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
-    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'jwt-secret')
-    JWT_ACCESS_TOKEN_EXPIRES = 3600
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
+config = Config()
