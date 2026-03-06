@@ -1,7 +1,4 @@
-flask>=2.3.0
-flask_sqlalchemy>=3.0.0
-psycopg2-binary>=2.9.0
-pydantic>=2.0.0
-pyjwt>=2.0.0
-cryptography>=42.0.0
-werkzeug>=3.0.0
+fastapi>=0.112.0
+sqlalchemy>=2.0
+sqlalchemy-utils[encrypted]
+uvicorn[standard]
