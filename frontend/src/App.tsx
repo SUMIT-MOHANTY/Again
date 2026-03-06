@@ -1,13 +1,27 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { PortfolioProvider, usePortfolio } from './context/PortfolioContext';
+import { SearchBar } from './components/SearchBar';
+import { FilterPanel } from './components/FilterPanel';
+import { PortfolioGrid } from './components/PortfolioGrid';
 
-function App() {
+const CATEGORIES = ['Web Development', 'Mobile App', 'Data Science', 'DevOps'];
+const TECHNOLOGIES = ['React', 'Python', 'TypeScript', 'PostgreSQL', 'Docker', 'AWS', 'Node.js', 'Vue.js'];
+
+function AppContent() {
+  const { items, loading, setSearchQuery, setFilters } = usePortfolio();
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<div>Welcome to Portfolio App</div>} />
-      </Routes>
-    </BrowserRouter>
-  )
+    <div className="app">
+      <h1>Portfolio Projects</h1>
+      <SearchBar onSearch={setSearchQuery} />
+      <FilterPanel categories={CATEGORIES} technologies={TECHNOLOGIES} onFilterChange={setFilters} />
+      {loading ? <p>Loading...</p> : <PortfolioGrid items={items} />}
+    </div>
+  );
 }
 
-export default App
+export default function App() {
+  return (
+    <PortfolioProvider>
+      <AppContent />
+    </PortfolioProvider>
+  );
+}
