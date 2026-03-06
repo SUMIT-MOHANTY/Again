@@ -1,14 +1,10 @@
 {
-  "name": "book-demo",
-  "version": "0.1.0",
-  "private": true,
+  "name": "frontend",
+  "version": "1.0.0",
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "axios": "^1.4.0"
-  },
-  "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build"
+    "axe-core": "^46.0.0",
+    "react-helmet": "^6.1.0"
   }
 }
