@@ -1,72 +1,43 @@
-version: "3.9"
-services:
-  api:
-    build: .
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env.example
-    depends_on:
-      - db
-      - redis
-  db:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: dbname
-    ports:
-      - "5432:5432"
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
 version: '3.9'
 services:
   db:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    environment:
-      - DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/postgres
-      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
-      - AZURE_OPENAI_KEY=${AZURE_OPENAI_KEY}
-      - AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT}
+  redis:
+    image: redis:7-alpine
     ports:
-      - "8000:8000"
-    depends_on:
-      - db
+      - "6379:6379"
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
 
   backend:
     build: ./backend
-    environment:
-      - AZURE_OPENAI_KEY=your-azure-openai-key
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=postgres
-      - POSTGRES_HOST=db
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    env_file: ./backend/.env.example
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      mailhog:
+        condition: service_started
     ports:
       - "8000:8000"
-  frontend:
-    build: ./frontend
-    ports:
-      - "3000:3000"
-    environment:
-      - VITE_BACKEND_URL=http://localhost:8000
-    depends_on:
-      - backend
+
 volumes:
-  pgdata:
+  pg_data:

@@ -1,13 +1,15 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 
 class UserBase(BaseModel):
-    username: str = Field(..., max_length=50)
     email: EmailStr
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=6)
+    password: str
 
 class UserRead(UserBase):
     id: int
+    is_active: bool
+    is_superuser: bool
+
     class Config:
         orm_mode = True

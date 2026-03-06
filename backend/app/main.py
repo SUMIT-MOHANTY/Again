@@ -1,15 +1,15 @@
-import uvicorn
-from . import create_app
 from fastapi import FastAPI
-from .api import users, prompts, completions
+from .api import router as api_router
+from .models.base import Base
+from .dependencies import engine
 
 def create_app() -> FastAPI:
-    app = FastAPI(title='Analytics Dashboard')
-    app.include_router(users.router, prefix='/api/users', tags=['users'])
-    app.include_router(prompts.router, prefix='/api/prompts', tags=['prompts'])
-    app.include_router(completions.router, prefix='/api/completions', tags=['completions'])
+    app = FastAPI(title='Staging API')
+    app.include_router(api_router)
+    # Create tables on startup (for staging/mock)
+    @app.on_event('startup')
+    def on_startup():
+        Base.metadata.create_all(bind=engine)
     return app
 
-if __name__ == "__main__":
-    uvicorn.run("backend.app.main:app", host="0.0.0.0", port=8000, reload=True)
 app = create_app()

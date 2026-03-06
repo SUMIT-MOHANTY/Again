@@ -1,9 +1,7 @@
-# expose router modules for import in app factory
 from fastapi import APIRouter
+from .v1 import auth, users, items
 
-router = APIRouter()
-
-# Example endpoint (can be expanded later)
-@router.get("/health")
-def health_check() -> dict:
-    return {"status": "ok"}
+router = APIRouter(prefix='/api/v1')
+router.include_router(auth.router, tags=['auth'])
+router.include_router(users.router, tags=['users'])
+router.include_router(items.router, tags=['items'])
