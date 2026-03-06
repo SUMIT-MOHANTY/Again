@@ -1,37 +1,13 @@
-import React, { useState } from "react";
-import axios from "axios";
-
-function App() {
-  const [bookId, setBookId] = useState("");
-  const [book, setBook] = useState(null);
-  const [error, setError] = useState("");
-
-  const fetchBook = async () => {
-    try {
-      const resp = await axios.get(`/books/${bookId}`);
-      setBook(resp.data);
-      setError("");
-    } catch (e) {
-      setError(e.response?.data?.detail || "Error fetching book");
-      setBook(null);
-    }
-  };
-
-  return (
-    <div style={{ padding: "2rem" }}>
-      <h1>Book Lookup Demo</h1>
-      <input type="number" value={bookId} onChange={e => setBookId(e.target.value)} placeholder="Book ID" />
-      <button onClick={fetchBook}>Fetch</button>
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      {book && (
-        <div>
-          <h2>{book.title}</h2>
-          <p><strong>Author:</strong> {book.author}</p>
-          <p>{book.description}</p>
-        </div>
-      )}
-    </div>
-  );
+import React, {useEffect, useState} from 'react';
+import axios from 'axios';
+function App(){
+  const [backups, setBackups] = useState([]);
+  useEffect(()=>{axios.get('/api/v1/backups').then(r=>setBackups(r.data));}, []);
+  const trigger = ()=>{axios.post('/api/v1/backups').then(()=>window.location.reload());};
+  return (<div style={{padding:'2rem'}}>
+    <h1>PostgreSQL Backups</h1>
+    <button onClick={trigger}>Run Backup Now</button>
+    <ul>{backups.map(b=>(<li key={b.id}>{b.filename} - {b.size_bytes} bytes - {b.created_at}</li>))}</ul>
+  </div>);
 }
-
 export default App;

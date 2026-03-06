@@ -1,31 +1,12 @@
-from flask import Blueprint, request, jsonify
-from backend.api.schemas import PortfolioResponse, PortfolioItem
-from backend.services.portfolio_service import search_portfolios
-from backend.data.mock_data import load_mock_data
-
-portfolio_bp = Blueprint('portfolio', __name__)
-
-@portfolio_bp.before_app_request
-def load_data():
-    from flask import current_app
-    from backend.models import db
-    with current_app.app_context():
-        load_mock_data()
-
-@portfolio_bp.route('/portfolio', methods=['GET'])
-def search_portfolio():
-    query = request.args.get('q', '')
-    category = request.args.get('category', '')
-    tags = request.args.get('tags', '')
-    tag_list = tags.split(',') if tags else []
-    results = search_portfolios(query, category, tag_list)
-    items = [PortfolioItem(
-        id=p.id,
-        title=p.title,
-        description=p.description,
-        category=p.category.name if p.category else '',
-        technologies=[t.name for t in p.technologies],
-        image_url=p.image_url,
-        project_url=p.project_url
-    ) for p in results]
-    return jsonify(PortfolioResponse(items=items, total=len(items)).model_dump())
+from . import api_bp
+from flask import jsonify, request, current_app
+from ..models import db, BackupLog
+@api_bp.route('/backups', methods=['GET'])
+def list_backups():
+    logs = BackupLog.query.order_by(BackupLog.created_at.desc()).all()
+    return jsonify([{'id': l.id, 'filename': l.filename, 'created_at': l.created_at.isoformat(), 'size_bytes': l.size_bytes} for l in logs])
+@api_bp.route('/backups', methods=['POST'])
+def trigger_backup():
+    from ..backup_service import run_backup
+    filename = run_backup()
+    return jsonify({'status': 'started', 'filename': filename}), 202
