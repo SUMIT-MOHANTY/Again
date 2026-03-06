@@ -1,0 +1,19 @@
+{
+  "name": "core-backend",
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "ts-node-dev backend/src/index.ts"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "dotenv": "^16.3.0",
+    "pg": "^8.11.0",
+    "redis": "^4.6.7",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "ts-node-dev": "^2.0.0"
+  }
+}
