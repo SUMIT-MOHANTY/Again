@@ -1,18 +1,11 @@
-from fastapi import FastAPI
-from .config import settings
-from .database import Base, engine
-from .api import router_user, router_book, router_review
+from flask import Flask
+from .config import Config
+from .feature_flags import feature_flags_bp
+from .feature_flags.store import load_feature_flags
 
-def create_app() -> FastAPI:
-    app = FastAPI(title="Library Management Service", version="0.1.0")
-    app.include_router(router_user.router)
-    app.include_router(router_book.router)
-    app.include_router(router_review.router)
-from .api import router as api_router
-
-def create_app() -> FastAPI:
-    app = FastAPI(title=settings.PROJECT_NAME)
-    app.include_router(api_router)
-def get_application():
-    from .main import app
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    load_feature_flags()
+    app.register_blueprint(feature_flags_bp, url_prefix='/api')
     return app
