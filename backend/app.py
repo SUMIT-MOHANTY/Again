@@ -1,26 +1,9 @@
 from flask import Flask
-from flask_cors import CORS
-from models import db
-from config import Config
-from api.routes import seo, accessibility
+from .middleware.versioning import versioning_middleware
+from .api.v1 import api_v1
 
-def create_app(config_class=Config):
+def create_app():
     app = Flask(__name__)
-    app.config.from_object(config_class)
-    CORS(app)
-    db.init_app(app)
-
-    app.register_blueprint(seo.seo_bp)
-    app.register_blueprint(accessibility.accessibility_bp)
-
-    @app.route('/health')
-    def health():
-        return {'status': 'healthy'}
-
+    app.wsgi_app = versioning_middleware(app.wsgi_app)
+    app.register_blueprint(api_v1)
     return app
-
-if __name__ == '__main__':
-    app = create_app()
-    with app.app_context():
-        db.create_all()
-    app.run(debug=True, port=5000)
