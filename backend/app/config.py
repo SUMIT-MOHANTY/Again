@@ -1,15 +1,13 @@
-from pydantic import BaseSettings, PostgresDsn, Field
+from pydantic import BaseSettings, Field
 
 class Settings(BaseSettings):
-    POSTGRES_URL: PostgresDsn = Field(
-        "postgresql+asyncpg://user:password@localhost:5432/lms",
-        env="POSTGRES_URL",
-    )
-    JWT_SECRET_KEY: str = Field("supersecret", env="JWT_SECRET_KEY")
-    JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    PROJECT_NAME: str = Field(default="AI Service", env="PROJECT_NAME")
+    AZURE_OPENAI_ENDPOINT: str = Field(..., env="AZURE_OPENAI_ENDPOINT")
+    AZURE_OPENAI_KEY: str = Field(..., env="AZURE_OPENAI_KEY")
+    AZURE_OPENAI_DEPLOYMENT: str = Field(..., env="AZURE_OPENAI_DEPLOYMENT")
 
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
 
 settings = Settings()
