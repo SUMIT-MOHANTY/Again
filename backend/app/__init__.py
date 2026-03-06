@@ -1,26 +1,11 @@
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
-from flask_cors import CORS
-from flask_jwt_extended import JWTManager
-from flask_bcrypt import Bcrypt
+from fastapi import FastAPI
+from .config import settings
+from .database import Base, engine
+from .api import router_user, router_book, router_review
 
-db = SQLAlchemy()
-jwt = JWTManager()
-bcrypt = Bcrypt()
-
-def create_app():
-    app = Flask(__name__)
-    app.config.from_object('config.Config')
-    
-    db.init_app(app)
-    CORS(app, resources={r"/api/*": {"origins": app.config['CORS_ORIGINS'], "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}})
-    jwt.init_app(app)
-    bcrypt.init_app(app)
-    
-    from app.routes import api_bp
-    app.register_blueprint(api_bp)
-    
-    from app.errors import register_error_handlers
-    register_error_handlers(app)
-    
+def create_app() -> FastAPI:
+    app = FastAPI(title="Library Management Service", version="0.1.0")
+    app.include_router(router_user.router)
+    app.include_router(router_book.router)
+    app.include_router(router_review.router)
     return app
