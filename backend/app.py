@@ -1,7 +1,21 @@
-from . import create_app
-from .config import Config
+from flask import Flask, request, redirect, jsonify
+from .middleware.security import apply_security_headers
 
-if __name__ == '__main__':
-    app = create_app()
-    # Run with self‑signed TLS certificates
-    app.run(host='0.0.0.0', port=5000, ssl_context=(Config.CERT_PATH, Config.KEY_PATH))
+def create_app():
+    app = Flask(__name__)
+    apply_security_headers(app)
+
+    @app.before_request
+    def enforce_https():
+        if request.is_secure or request.headers.get('X-Forwarded-Proto', '').lower() == 'https':
+            return
+        url = request.url.replace('http://', 'https://')
+        return redirect(url, code=301)
+
+    @app.route('/health')
+    def health():
+        return jsonify({"status":"success","data":{"alive":True},"error":None})
+
+    return app
+
+app = create_app()
