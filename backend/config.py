@@ -1,11 +1,9 @@
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-class Config:
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key')
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'postgresql://localhost/a11y_db')
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
-    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'jwt-secret')
-    JWT_ACCESS_TOKEN_EXPIRES = 3600
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+DB_URL = os.getenv('DATABASE_URL', 'postgresql+psycopg2://postgres:postgres@db:5432/postgres')
+JWT_SECRET = os.getenv('JWT_SECRET', 'super-secret-key')
+ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY', 'your-key-here')
+# Ensure Fernet key size (32 url‑safe base64 bytes)
+if len(ENCRYPTION_KEY) < 32:
+    ENCRYPTION_KEY = ENCRYPTION_KEY.ljust(32, '0')
+FERNET_KEY = base64.urlsafe_b64encode(ENCRYPTION_KEY.encode())
