@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS books (\n    id SERIAL PRIMARY KEY,\n    title VARCHAR NOT NULL,\n    author VARCHAR,\n    isbn VARCHAR UNIQUE,\n    publication_date DATE\n);\n
