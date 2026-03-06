@@ -1,72 +1,18 @@
-version: "3.9"
+version: '3.8'
 services:
-  api:
-    build: .
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env.example
+  backend:
+    build: ./backend
+    env_file: .env
     depends_on:
       - db
       - redis
   db:
-    image: postgres:15-alpine
+    image: postgres:15
     environment:
       POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: dbname
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: library
   redis:
-    image: redis:7-alpine
+    image: redis:7
     ports:
       - "6379:6379"
-version: '3.9'
-services:
-  db:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    environment:
-      - DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/postgres
-      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
-      - AZURE_OPENAI_KEY=${AZURE_OPENAI_KEY}
-      - AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT}
-    ports:
-      - "8000:8000"
-    depends_on:
-      - db
-
-  backend:
-    build: ./backend
-    environment:
-      - AZURE_OPENAI_KEY=your-azure-openai-key
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=postgres
-      - POSTGRES_HOST=db
-    depends_on:
-      - db
-    ports:
-      - "8000:8000"
-  frontend:
-    build: ./frontend
-    ports:
-      - "3000:3000"
-    environment:
-      - VITE_BACKEND_URL=http://localhost:8000
-    depends_on:
-      - backend
-volumes:
-  pgdata:
