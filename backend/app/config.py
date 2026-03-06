@@ -1,16 +1,6 @@
 import os
-from pydantic import BaseSettings, Field
-
-class Settings(BaseSettings):
-    AZURE_OPENAI_KEY: str = Field('your-azure-openai-key', env='AZURE_OPENAI_KEY')
-    POSTGRES_USER: str = Field('postgres', env='POSTGRES_USER')
-    POSTGRES_PASSWORD: str = Field('postgres', env='POSTGRES_PASSWORD')
-    POSTGRES_DB: str = Field('postgres', env='POSTGRES_DB')
-    POSTGRES_HOST: str = Field('db', env='POSTGRES_HOST')
-    POSTGRES_PORT: int = Field(5432, env='POSTGRES_PORT')
-
-    class Config:
-        env_file = '.env'
-        env_file_encoding = 'utf-8'
-
-settings = Settings()
+RETRY_COUNT = int(os.getenv('RETRY_COUNT', '3'))
+RETRY_WAIT = float(os.getenv('RETRY_WAIT', '0.5'))
+CB_FAILURE_THRESHOLD = int(os.getenv('CB_FAILURE_THRESHOLD', '5'))
+CB_RECOVERY_TIMEOUT = int(os.getenv('CB_RECOVERY_TIMEOUT', '30'))
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql+asyncpg://user:pass@localhost/db')
