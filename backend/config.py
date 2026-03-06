@@ -1,11 +1,11 @@
 import os
-from dotenv import load_dotenv
+from dataclasses import dataclass
 
-load_dotenv()
-
+@dataclass
 class Config:
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key')
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'postgresql://localhost/a11y_db')
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
-    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'jwt-secret')
-    JWT_ACCESS_TOKEN_EXPIRES = 3600
+    POSTGRES_URI: str = os.getenv('POSTGRES_URI', 'postgres://user:password@localhost/db')
+    AZURE_OPENAI_KEY: str = os.getenv('AZURE_OPENAI_KEY', 'your-key-here')
+    AZURE_OPENAI_ENDPOINT: str = os.getenv('AZURE_OPENAI_ENDPOINT', 'https://your-resource.openai.azure.com/')
+    AZURE_OPENAI_DEPLOYMENT: str = os.getenv('AZURE_OPENAI_DEPLOYMENT', 'gpt-4o')
+
+config = Config()

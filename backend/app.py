@@ -1,26 +1,13 @@
-from flask import Flask
-from flask_cors import CORS
-from models import db
-from config import Config
-from api.routes import seo, accessibility
+from flask import Flask, jsonify
+from .config import config
+from .api.prompt import bp as prompt_bp
 
-def create_app(config_class=Config):
-    app = Flask(__name__)
-    app.config.from_object(config_class)
-    CORS(app)
-    db.init_app(app)
+app = Flask(__name__)
+app.register_blueprint(prompt_bp, url_prefix='/api')
 
-    app.register_blueprint(seo.seo_bp)
-    app.register_blueprint(accessibility.accessibility_bp)
-
-    @app.route('/health')
-    def health():
-        return {'status': 'healthy'}
-
-    return app
+@app.route('/health')
+def health():
+    return jsonify({'status': 'ok', 'postgres_uri': config.POSTGRES_URI})
 
 if __name__ == '__main__':
-    app = create_app()
-    with app.app_context():
-        db.create_all()
-    app.run(debug=True, port=5000)
+    app.run(host='0.0.0.0', port=5000)
