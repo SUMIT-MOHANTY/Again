@@ -1,0 +1,120 @@
+from fastapi import FastAPI
+from backend.routes.health import router as health_router
+
+app = FastAPI()
+
+# Include health‑check router
+app.include_router(health_router)
+
+# Placeholder: other routes will use the secrets manager (backend.secrets.manager)
+EOF
+
+# --------------------------------------------------------------------
+# backend/routes/health.py - health‑check endpoint
+# --------------------------------------------------------------------
+cat <<'EOF' > /workspace/backend/routes/health.py
+from fastapi import APIRouter
+from pydantic import BaseModel
+from datetime import datetime, timezone
+
+router = APIRouter()
+
+class HealthResponse(BaseModel):
+    status: str
+    timestamp: str  # ISO‑8601 string
+
+@router.get("/health", response_model=HealthResponse)
+def health_check() -> HealthResponse:
+    return HealthResponse(
+        status="ok",
+        timestamp=datetime.now(timezone.utc).isoformat()
+    )
+EOF
+
+# --------------------------------------------------------------------
+# backend/secrets package marker
+# --------------------------------------------------------------------
+touch /workspace/backend/secrets/__init__.py
+
+# --------------------------------------------------------------------
+# backend/secrets/config.py - environment configuration
+# --------------------------------------------------------------------
+cat <<'EOF' > /workspace/backend/secrets/config.py
+import os
+
+SECRETS_MANAGER = os.getenv("SECRETS_MANAGER", "aws")
+SECRETS_VAULT_NAME = os.getenv("SECRETS_VAULT_NAME", "default-vault")
+EOF
+
+# --------------------------------------------------------------------
+# backend/secrets/manager.py - wrappers for AWS / Azure
+# --------------------------------------------------------------------
+cat <<'EOF' > /workspace/backend/secrets/manager.py
+import os
+from typing import List
+
+# Load configuration values
+from .config import SECRETS_MANAGER, SECRETS_VAULT_NAME
+
+def _get_aws_client():
+    import boto3
+    return boto3.client("secretsmanager")
+
+def _get_azure_client():
+    from azure.identity import DefaultAzureCredential
+    from azure.keyvault.secrets import SecretClient
+    vault_url = f"https://{SECRETS_VAULT_NAME}.vault.azure.net/"
+    credential = DefaultAzureCredential()
+    return SecretClient(vault_url=vault_url, credential=credential)
+
+def get_secret(secret_name: str) -> str:
+    """
+    Retrieve a secret value by its identifier.
+    """
+    if SECRETS_MANAGER == "aws":
+        client = _get_aws_client()
+        resp = client.get_secret_value(SecretId=secret_name)
+        return resp.get("SecretString", "")
+    elif SECRETS_MANAGER == "azure":
+        client = _get_azure_client()
+        secret = client.get_secret(secret_name)
+        return secret.value
+    else:
+        raise RuntimeError(f"Unsupported secrets manager: {SECRETS_MANAGER}")
+
+def list_secrets() -> List[str]:
+    """
+    List identifiers of all available secrets.
+    """
+    if SECRETS_MANAGER == "aws":
+        client = _get_aws_client()
+        resp = client.list_secrets()
+        return [s["Name"] for s in resp.get("SecretList", [])]
+    elif SECRETS_MANAGER == "azure":
+        client = _get_azure_client()
+        return [s.name for s in client.list_properties_of_secrets()]
+    else:
+        raise RuntimeError(f"Unsupported secrets manager: {SECRETS_MANAGER}")
+EOF
+
+# --------------------------------------------------------------------
+# .env.example - placeholder environment values (repo root)
+# --------------------------------------------------------------------
+cat <<'EOF' >> /workspace/.env.example
+SECRETS_MANAGER=aws          # or azure, gcp
+SECRETS_VAULT_NAME=project-secrets-vault
+EOF
+
+# --------------------------------------------------------------------
+# docs/SECRETS_DESIGN.md - design documentation
+# --------------------------------------------------------------------
+cat <<'EOF' > /workspace/docs/SECRETS_DESIGN.md
+# Secrets Storage Design
+
+## Solution selection
+Supported secrets managers:
+- **AWS Secrets Manager** (`SECRETS_MANAGER=aws`)
+- **Azure Key Vault** (`SECRETS_MANAGER=azure`)
+
+## Vault creation
+Create a dedicated vault whose name matches the `SECRETS_VAULT_NAME` environment variable, e.g.:
