@@ -1,0 +1,259 @@
+from pydantic import BaseModel, Field
+
+class StoryBase(BaseModel):
+    title: str
+    acceptance_criteria: str
+    priority_vote: int = Field(..., ge=1, le=5)
+
+class StoryCreate(StoryBase):
+    pass
+
+class Story(StoryBase):
+    story_id: int
+EOF
+
+# 2. backend/app/routers/workshop.py
+cat <<'EOF' > /workspace/backend/app/routers/workshop.py
+from fastapi import APIRouter, HTTPException
+from typing import List, Dict, Any
+from ..models.workshop import Story, StoryCreate
+from ..database import get_all_stories, add_story, send_review_request
+
+router = APIRouter()
+
+@router.get("/stories", response_model=List[Story])
+def get_stories():
+    return get_all_stories()
+
+@router.post("/stories", response_model=Story)
+def create_story(story: StoryCreate):
+    return add_story(story)
+
+@router.post("/review")
+def review(payload: Dict[str, Any]):
+    story_ids = payload.get("story_ids")
+    if not isinstance(story_ids, list):
+        raise HTTPException(status_code=400, detail="story_ids must be a list")
+    send_review_request(story_ids)
+    return {"status": "review_sent"}
+EOF
+
+# 3. backend/app/database.py (in‑memory repository)
+cat <<'EOF' > /workspace/backend/app/database.py
+from typing import List
+from .models.workshop import Story, StoryCreate
+
+_stories: List[Story] = []
+_next_id: int = 1
+
+def get_all_stories() -> List[Story]:
+    return list(_stories)
+
+def add_story(story_create: StoryCreate) -> Story:
+    global _next_id
+    story = Story(story_id=_next_id, **story_create.dict())
+    _next_id += 1
+    _stories.append(story)
+    return story
+
+def send_review_request(story_ids: List[int]) -> None:
+    # Simulated review: just log
+    import logging
+    logger = logging.getLogger("workshop")
+    logger.info(f"Review requested for story IDs: {story_ids}")
+EOF
+
+# 4. backend/app/main.py - include workshop router
+if grep -q "include_router.*workshop" /workspace/backend/app/main.py; then
+    echo "Workshop router already included."
+else
+    # Append import and include lines at end of file
+    cat <<'EOF' >> /workspace/backend/app/main.py
+
+from .routers.workshop import router as workshop_router
+app.include_router(workshop_router, prefix="/api/workshop")
+EOF
+fi
+
+# 5. frontend/src/types/Workshop.ts
+cat <<'EOF' > /workspace/frontend/src/types/Workshop.ts
+export interface Story {
+  story_id: number;
+  title: string;
+  acceptance_criteria: string;
+  priority_vote: number;
+}
+
+export interface StoryCreate {
+  title: string;
+  acceptance_criteria: string;
+  priority_vote: number;
+}
+EOF
+
+# 6. frontend/src/api/workshop.ts
+cat <<'EOF' > /workspace/frontend/src/api/workshop.ts
+import type { Story, StoryCreate } from '../types/Workshop';
+
+const API_BASE = '/api/workshop';
+
+export async function fetchStories(): Promise<Story[]> {
+  const resp = await fetch(`${API_BASE}/stories`);
+  if (!resp.ok) throw new Error('Failed to fetch stories');
+  return resp.json();
+}
+
+export async function addStory(story: StoryCreate): Promise<Story> {
+  const resp = await fetch(`${API_BASE}/stories`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(story),
+  });
+  if (!resp.ok) throw new Error('Failed to add story');
+  return resp.json();
+}
+
+export async function sendReview(storyIds: number[]): Promise<{ status: string }> {
+  const resp = await fetch(`${API_BASE}/review`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ story_ids: storyIds }),
+  });
+  if (!resp.ok) throw new Error('Failed to send review');
+  return resp.json();
+}
+EOF
+
+# 7. frontend/src/components/WorkshopBoard.tsx
+cat <<'EOF' > /workspace/frontend/src/components/WorkshopBoard.tsx
+import React, { useEffect, useState } from 'react';
+import type { Story, StoryCreate } from '../types/Workshop';
+import { fetchStories, addStory, sendReview } from '../api/workshop';
+
+const WorkshopBoard: React.FC = () => {
+  const [stories, setStories] = useState<Story[]>([]);
+  const [form, setForm] = useState<StoryCreate>({ title: '', acceptance_criteria: '', priority_vote: 1 });
+
+  useEffect(() => {
+    loadStories();
+  }, []);
+
+  const loadStories = async () => {
+    const data = await fetchStories();
+    setStories(data);
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setForm(prev => ({ ...prev, [name]: name === 'priority_vote' ? Number(value) : value }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const created = await addStory(form);
+    setStories(prev => [...prev, created]);
+    setForm({ title: '', acceptance_criteria: '', priority_vote: 1 });
+  };
+
+  const handleReview = async () => {
+    const ids = stories.map(s => s.story_id);
+    await sendReview(ids);
+    alert('Review request sent');
+  };
+
+  return (
+    <div>
+      <h2>Workshop Stories</h2>
+      <ul>
+        {stories.map(s => (
+          <li key={s.story_id}>
+            <strong>{s.title}</strong> (Priority: {s.priority_vote})
+            <p>{s.acceptance_criteria}</p>
+          </li>
+        ))}
+      </ul>
+
+      <h3>Add New Story</h3>
+      <form onSubmit={handleSubmit}>
+        <input name="title" placeholder="Title" value={form.title} onChange={handleChange} required />
+        <textarea
+          name="acceptance_criteria"
+          placeholder="Acceptance Criteria"
+          value={form.acceptance_criteria}
+          onChange={handleChange}
+          required
+        />
+        <input
+          name="priority_vote"
+          type="number"
+          min={1}
+          max={5}
+          value={form.priority_vote}
+          onChange={handleChange}
+          required
+        />
+        <button type="submit">Add Story</button>
+      </form>
+
+      <button onClick={handleReview} disabled={stories.length === 0}>
+        Send for Review
+      </button>
+    </div>
+  );
+};
+
+export default WorkshopBoard;
+EOF
+
+# 8. frontend/src/App.tsx - render WorkshopBoard
+cat <<'EOF' > /workspace/frontend/src/App.tsx
+import React from 'react';
+import WorkshopBoard from './components/WorkshopBoard';
+
+function App() {
+  return (
+    <div className="App">
+      <WorkshopBoard />
+    </div>
+  );
+}
+
+export default App;
+EOF
+
+# 9. backend/.env.example - add optional vars
+if [ -f /workspace/backend/.env.example ]; then
+  grep -q "WORKSHOP_LOG_LEVEL" /workspace/backend/.env.example || \
+  cat <<'EOF' >> /workspace/backend/.env.example
+
+# Workshop optional configuration
+WORKSHOP_LOG_LEVEL=INFO
+WORKSHOP_FEATURE_FLAG=true
+EOF
+else
+  cat <<'EOF' > /workspace/backend/.env.example
+
+# Workshop optional configuration
+WORKSHOP_LOG_LEVEL=INFO
+WORKSHOP_FEATURE_FLAG=true
+EOF
+fi
+
+# 10. README.md - append Workshop API section
+cat <<'EOF' >> /workspace/README.md
+
+## Workshop API
+
+The Workshop module provides a lightweight in‑memory store for user stories collected during workshops.
+
+### Endpoints
+
+| Method | URL | Description |
+|--------|-----|-------------|
+| `GET` | `/api/workshop/stories` | Returns the list of all stored stories. |
+| `POST` | `/api/workshop/stories` | Creates a new story. Body must match `StoryCreate` (no `story_id`). Returns the created `Story` with generated `story_id`. |
+| `POST` | `/api/workshop/review` | Sends a review request for the supplied story IDs. Payload: `{ "story_ids": [1,2,3] }`. Returns `{ "status": "review_sent" }`. |
+
+All request and response payloads use **snake_case** JSON keys.
+
+### Example Usage (curl)
