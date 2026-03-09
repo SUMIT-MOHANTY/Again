@@ -1,4 +1,5 @@
-version: "3.9"
+version: '3.9'
+
 services:
   api:
     build: .
@@ -9,64 +10,38 @@ services:
     depends_on:
       - db
       - redis
-  db:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: dbname
-    ports:
-      - "5432:5432"
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-version: '3.9'
-services:
+
   db:
     image: postgres:15-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: fintech
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
 
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  kong:
+    image: kong:3.5
     environment:
-      - DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/postgres
-      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
-      - AZURE_OPENAI_KEY=${AZURE_OPENAI_KEY}
-      - AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT}
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
     ports:
       - "8000:8000"
-    depends_on:
-      - db
+      - "8001:8001"
+    volumes:
+      - ./kong.yml:/kong/declarative/kong.yml
 
-  backend:
-    build: ./backend
-    environment:
-      - AZURE_OPENAI_KEY=your-azure-openai-key
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=postgres
-      - POSTGRES_HOST=db
-    depends_on:
-      - db
-    ports:
-      - "8000:8000"
-  frontend:
-    build: ./frontend
-    ports:
-      - "3000:3000"
-    environment:
-      - VITE_BACKEND_URL=http://localhost:8000
-    depends_on:
-      - backend
 volumes:
-  pgdata:
+  postgres_data:
