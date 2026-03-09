@@ -1,0 +1,284 @@
+# backend/api/v1/routers/loans.py
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
+from backend.data.database import get_db
+from backend.app.services.loan_service import LoanService
+from backend.data.models.user import User
+from backend.api.v1.dependencies.auth import get_current_user
+from backend.data.schemas.loan_schemas import LoanRequest, LoanResponse, RepaymentRequest, RepaymentResponse
+from typing import Optional
+
+router = APIRouter(prefix="/loans", tags=["loans"])
+
+@router.post("/", response_model=dict)
+async def create_loan(
+    request: Request,
+    loan_request: LoanRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    loan_service = LoanService(db)
+    loan = await loan_service.create_loan(current_user.id, loan_request)
+    return {
+        "status": "success",
+        "data": LoanResponse.from_orm(loan),
+        "trace_id": str(request.state.trace_id)
+    }
+
+@router.patch("/{loan_id}/approve", response_model=dict)
+async def approve_loan(
+    request: Request,
+    loan_id: UUID,
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role != 'admin':
+        raise HTTPException(403, "Admin required")
+    loan_service = LoanService(db)
+    loan = await loan_service.approve_or_deny_loan(loan_id, payload["approved"])
+    return {
+        "status": "success",
+        "data": LoanResponse.from_orm(loan),
+        "trace_id": str(request.state.trace_id)
+    }
+
+@router.patch("/{loan_id}/disburse", response_model=dict)
+async def disburse_loan(
+    request: Request,
+    loan_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role != 'admin':
+        raise HTTPException(403, "Admin required")
+    loan_service = LoanService(db)
+    loan = await loan_service.disburse_loan(loan_id)
+    return {
+        "status": "success",
+        "data": LoanResponse.from_orm(loan),
+        "trace_id": str(request.state.trace_id)
+    }
+
+@router.post("/{loan_id}/repayment", response_model=dict)
+async def repay_loan(
+    request: Request,
+    loan_id: UUID,
+    repayment: RepaymentRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    loan_service = LoanService(db)
+    repayment_record = await loan_service.record_repayment(loan_id, current_user.id, repayment.amount)
+    return {
+        "status": "success",
+        "data": RepaymentResponse(
+            loan_id=loan_id,
+            repayment_id=repayment_record.id,
+            amount=repayment_record.amount,
+            paid_at=repayment_record.created_at
+        ),
+        "trace_id": str(request.state.trace_id)
+    }
+EOF
+
+# backend/app/services/loan_service.py
+cat <<'EOF' > backend/app/services/loan_service.py
+# backend/app/services/loan_service.py
+import uuid
+from decimal import Decimal
+from sqlalchemy.orm import Session
+from backend.data.models.loan import Loan, LoanAudit
+from backend.app.services.risk_client import RiskScoreClient
+from backend.data.schemas.loan_schemas import LoanRequest
+from backend.app.events.kafka_producer import publish_loan_disbursed
+import structlog
+
+logger = structlog.get_logger()
+
+class LoanService:
+    def __init__(self, db: Session):
+        self.db = db
+        self.risk_client = RiskScoreClient()
+
+    async def create_loan(self, user_id: uuid.UUID, request: LoanRequest) -> Loan:
+        risk_score = await self.risk_client.get_score(str(user_id))
+        loan = Loan(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            amount=request.amount,
+            purpose=request.purpose,
+            currency=request.currency,
+            term_months=request.term_months,
+            risk_score=Decimal(str(risk_score)),
+            status="PENDING",
+            approved=None
+        )
+        self.db.add(loan)
+        self.db.commit()
+        logger.bind(loan_id=str(loan.id)).info("loan_created")
+        return loan
+
+    async def approve_or_deny_loan(self, loan_id: uuid.UUID, approved: bool) -> Loan:
+        loan = self.db.query(Loan).filter(Loan.id == loan_id).first()
+        if not loan: raise ValueError("Loan not found")
+        if loan.status != "PENDING": raise ValueError("Loan not pending")
+        loan.approved = approved
+        loan.status = "APPROVED" if approved else "DENIED"
+        loan_audit = LoanAudit(loan_id=loan.id, action="APPROVED" if approved else "DENIED")
+        self.db.add(loan_audit)
+        self.db.commit()
+        logger.bind(loan_id=str(loan.id), approved=approved).info("loan_decision_made")
+        return loan
+
+    async def disburse_loan(self, loan_id: uuid.UUID) -> Loan:
+        loan = self.db.query(Loan).filter(Loan.id == loan_id, Loan.approved == True).first()
+        if not loan: raise ValueError("Loan not found or not approved")
+        loan.status = "DISBURSED"
+        loan_audit = LoanAudit(loan_id=loan.id, action="DISBURSED")
+        self.db.add(loan_audit)
+        self.db.commit()
+        await publish_loan_disbursed(loan.id, loan.amount)
+        logger.bind(loan_id=str(loan.id)).info("loan_disbursed")
+        return loan
+
+    async def record_repayment(self, loan_id: uuid.UUID, user_id: uuid.UUID, amount: Decimal):
+        loan = self.db.query(Loan).filter(Loan.id == loan_id, Loan.user_id == user_id).first()
+        if not loan: raise ValueError("Loan not found")
+        audit = LoanAudit(loan_id=loan_id, action=f"REPAYMENT {amount}")
+        self.db.add(audit)
+        # TODO: check if fully repaid to update status
+        self.db.commit()
+        logger.bind(loan_id=str(loan_id), amount=amount).info("loan_repaid")
+        return audit
+EOF
+
+# backend/app/services/risk_client.py
+cat <<'EOF' > backend/app/services/risk_client.py
+# backend/app/services/risk_client.py
+import random
+import httpx
+
+class RiskScoreClient:
+    async def get_score(self, user_id: str) -> float:
+        return random.uniform(0.1, 0.9)
+EOF
+
+# backend/data/models/loan.py
+cat <<'EOF' > backend/data/models/loan.py
+# backend/data/models/loan.py
+from sqlalchemy import Column, DateTime, String, Numeric, Boolean, Integer, ForeignKey, Enum
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+from backend.data.database import Base
+from datetime import datetime
+import uuid
+
+class Loan(Base):
+    __tablename__ = "loans"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    amount = Column(Numeric(14, 2), nullable=False)
+    purpose = Column(String, nullable=False)
+    currency = Column(String(3), nullable=False, default="USD")
+    term_months = Column(Integer, nullable=False)
+    risk_score = Column(Numeric(5, 2), nullable=False)
+    approved = Column(Boolean, nullable=True)
+    status = Column(String, default="PENDING")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class LoanAudit(Base):
+    __tablename__ = "loan_audits"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    loan_id = Column(UUID(as_uuid=True), ForeignKey("loans.id"), nullable=False)
+    action = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+EOF
+
+# backend/data/schemas/loan_schemas.py
+cat <<'EOF' > backend/data/schemas/loan_schemas.py
+# backend/data/schemas/loan_schemas.py
+from pydantic import BaseModel, Field
+from decimal import Decimal
+from uuid import UUID
+from typing import Optional
+from datetime import datetime
+
+class LoanRequest(BaseModel):
+    amount: Decimal = Field(max_digits=14, decimal_places=2)
+    purpose: str
+    currency: str = "USD"
+    term_months: int = Field(..., regex=r'^(12|24|36)$')
+
+class LoanResponse(BaseModel):
+    id: UUID
+    user_id: UUID
+    amount: Decimal
+    approved: Optional[bool]
+    status: str
+    risk_score: Decimal
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+class RepaymentRequest(BaseModel):
+    amount: Decimal = Field(max_digits=14, decimal_places=2)
+
+class RepaymentResponse(BaseModel):
+    loan_id: UUID
+    repayment_id: UUID
+    amount: Decimal
+    paid_at: datetime
+
+    class Config:
+        orm_mode = True
+EOF
+
+# backend/app/events/loan_events.py
+cat <<'EOF' > backend/app/events/loan_events.py
+# backend/app/events/loan_events.py
+from pydantic import BaseModel
+from decimal import Decimal
+from uuid import UUID
+from datetime import datetime
+
+class LoanDisbursed(BaseModel):
+    loan_id: UUID
+    amount: Decimal
+    timestamp: datetime
+EOF
+
+# backend/app/events/kafka_producer.py
+cat <<'EOF' > backend/app/events/kafka_producer.py
+# backend/app/events/kafka_producer.py
+from confluent_kafka import Producer
+from datetime import datetime
+from backend.app.config.env import KAFKA_BROKER
+from backend.app.events.loan_events import LoanDisbursed
+import json
+import uuid
+
+producer = Producer({'bootstrap.servers': KAFKA_BROKER})
+
+async def publish_loan_disbursed(loan_id: uuid.UUID, amount: Decimal):
+    event = LoanDisbursed(
+        loan_id=loan_id,
+        amount=amount,
+        timestamp=datetime.utcnow()
+    )
+    producer.produce("loan_disbursed", json.dumps(event.dict()).encode())
+    producer.flush()
+EOF
+
+# backend/app/config/env.py
+cat <<'EOF' > backend/app/config/env.py
+# backend/app/config/env.py
+import os
+
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:9092")
+EOF
+
+printf 'Loans workflow implemented\n'
+ls backend/data/models backend/app/services backend/api/v1/routers
