@@ -1,0 +1,59 @@
+# Binaries & built output
+**/bin/
+**/tmp/
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+# Helm charts rendered
+rendered/
+# OS
+.DS_Store
+Thumbs.db
+# IDE
+.vscode/
+.idea/
+EOF
+
+# 3.2 README.md (root)
+cat <<'EOF' > README.md
+# Fintech Platform Monorepo
+
+A Kubernetes-native micro-service backend exposing REST APIs for banking, insurance, ledger, and dashboard components.
+
+- [Getting Started](#getting-started)
+- [Architecture Quick-Look](#architecture-quick-look)
+- [Local Development](#local-development)
+
+## Getting Started
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for local setup instructions.
+
+## Architecture Quick-Look
+- **Edge Layer:** Kong Gateway (`infra`) - OIDC, rate-limiting, metrics
+- **Auth Layer:** Keycloak (`auth` namespace)
+- **Services:**
+  - `services/go-bank` - Banking APIs (`/api/v1/accounts`, `/api/v1/transfers` ...)
+  - `services/go-insur` - Insurance APIs
+  - `services/go-ledger` - Internal ledger service
+  - `services/go-dash` - Admin dashboard operations
+- **Data:** PostgreSQL multi-tenant (column `tenant_id INT`), Hyperledger Fabric
+- **Observability:** Prometheus / Grafana, ELK stack (stdout -> Fluent Bit -> Logstash -> Elastic)
+
+## Local Development
+Prerequisites:
+- Docker & Docker Compose ≥ v2
+- kubectl, helm3
+- Pre-commit hooks: install via `pre-commit install`
+
+Spin-up:
