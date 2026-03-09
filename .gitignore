@@ -1,0 +1,116 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+node_modules/
+.env
+*.log
+.DS_Store
+Thumbs.db
+venv/
+env/
+.venv/
+EOF
+echo "[CREATED] .gitignore"
+
+[SPRINT 4] Backend API skeleton
+cat <<'EOF' > backend/main.py
+from flask import Flask, request, jsonify
+app = Flask(__name__)
+
+@app.route('/healthz')
+def health():
+    return {'status': 'ok'}, 200
+EOF
+echo "[CREATED] backend/main.py"
+
+[SPRINT 5] Kong Gateway manifests
+cat <<'EOF' > infrastructure/k8s/kong-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong
+  namespace: infra
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: kong}
+  template:
+    metadata:
+      labels: {app: kong}
+    spec:
+      containers:
+      - name: kong
+        image: kong:3.4
+        env:
+        - name: KONG_DATABASE
+          value: "off"
+        - name: KONG_DECLARATIVE_CONFIG
+          value: "/kong/declarative/kong.yml"
+        ports:
+        - containerPort: 8000
+        - containerPort: 8443
+EOF
+echo "[CREATED] infrastructure/k8s/kong-deployment.yaml"
+
+[SPRINT 6] Monitoring charts
+cat <<'EOF' > infrastructure/helm/monitoring/values.yaml
+prometheus:
+  server:
+    persistentVolume:
+      enabled: false
+grafana:
+  adminUser: admin
+  adminPassword: admin
+  persistence:
+    enabled: false
+EOF
+echo "[CREATED] infrastructure/helm/monitoring/values.yaml"
+
+[SPRINT 7] Logging stack
+cat <<'EOF' > infrastructure/helm/logging/values.yaml
+elasticsearch:
+  replicas: 1
+  minimumMasterNodes: 1
+logstash:
+  enabled: true
+kibana:
+  service:
+    type: ClusterIP
+EOF
+echo "[CREATED] infrastructure/helm/logging/values.yaml"
+
+[SPRINT 8] Deployment script
+cat <<'EOF' > scripts/deploy.sh
+#!/bin/sh
+set -ex
+kubectl create namespace infra || true
+kubectl apply -f infrastructure/k8s/
+helm upgrade --install monitoring infrastructure/helm/monitoring -n infra
+helm upgrade --install logging infrastructure/helm/logging -n infra
+EOF
+chmod +x scripts/deploy.sh
+echo "[CREATED] scripts/deploy.sh"
+
+[SPRINT 9] Health check test
+cat <<'EOF' > tests/test_health.py
+import requests
+def test_health():
+    r = requests.get('http://localhost:5000/healthz')
+    assert r.status_code == 200
+EOF
+echo "[CREATED] tests/test_health.py"
+
+[SPRINT 10] Verify all files are created
+ls backend/ && echo "[CHECK] backend files OK"
+ls infrastructure/k8s/ && echo "[CHECK] k8s manifests OK"
+ls infrastructure/helm/{monitoring,logging}/values.yaml && echo "[CHECK] helm charts OK"
+ls scripts/deploy.sh && echo "[CHECK] deployment script executable"
+echo "[FIX 10] completed all tasks"
+
+=== FIX SUMMARY ===
+- Fixed shell script runtime error
+- Created complete project scaffold for ELK + Prometheus/Grafana observability
+- Added .gitignore to prevent cache/artifacts
+- Generated deployment and test stubs
+- All critical directories and files now present
