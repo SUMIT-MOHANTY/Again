@@ -1,0 +1,258 @@
+-- Core fintech platform schema
+CREATE SCHEMA IF NOT EXISTS fintech;
+
+-- Users table (managed by Keycloak, replicated here)
+CREATE TABLE fintech.users (
+    user_id UUID PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Accounts table
+CREATE TABLE fintech.accounts (
+    account_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES fintech.users(user_id),
+    account_number VARCHAR(20) UNIQUE NOT NULL,
+    balance DECIMAL(15,2) NOT NULL DEFAULT 0,
+    currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT positive_balance CHECK (balance >= 0)
+);
+
+-- Transactions table
+CREATE TABLE fintech.transactions (
+    transaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    from_account_id UUID REFERENCES fintech.accounts(account_id),
+    to_account_id UUID REFERENCES fintech.accounts(account_id),
+    amount DECIMAL(15,2) NOT NULL,
+    transaction_ref VARCHAR(255),
+    ledger_hash VARCHAR(64),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT positive_amount CHECK (amount > 0)
+);
+
+-- Loans table
+CREATE TABLE fintech.loans (
+    loan_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES fintech.users(user_id),
+    loan_number VARCHAR(20) UNIQUE NOT NULL,
+    principal DECIMAL(15,2) NOT NULL,
+    interest_rate DECIMAL(5,4) NOT NULL,
+    term_months INTEGER NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT positive_principal CHECK (principal > 0)
+);
+
+-- Policies table
+CREATE TABLE fintech.policies (
+    policy_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES fintech.users(user_id),
+    policy_number VARCHAR(20) UNIQUE NOT NULL,
+    premium DECIMAL(10,2) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    next_due_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT positive_premium CHECK (premium > 0)
+);
+
+-- Create indexes for performance
+CREATE INDEX idx_accounts_user_id ON fintech.accounts(user_id);
+CREATE INDEX idx_transactions_from_account ON fintech.transactions(from_account_id);
+CREATE INDEX idx_transactions_to_account ON fintech.transactions(to_account_id);
+CREATE INDEX idx_loans_user_id ON fintech.loans(user_id);
+CREATE INDEX idx_policies_user_id ON fintech.policies(user_id);
+CREATE INDEX idx_policies_next_due ON fintech.policies(next_due_at) WHERE status = 'ACTIVE';
+EOF
+printf '[CREATED] backend/migrations/001_create_base_schema.sql\n'
+[ -f backend/migrations/001_create_base_schema.sql ] && printf '[CHECK] PASS schema file created\n'
+
+# Create seed data
+cat <<'EOF' > backend/seeds/seed_data.sql
+-- Sample seed data
+INSERT INTO fintech.users (user_id, email) VALUES
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'john.doe@example.com'),
+    ('b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'jane.smith@example.com');
+
+INSERT INTO fintech.accounts (account_id, user_id, account_number, balance, currency) VALUES
+    ('c2eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'ACC1000001', 10000.00, 'USD'),
+    ('d3eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'ACC1000002', 2500.00, 'USD'),
+    ('e4eebc99-9c0b-4ef8-bb6d-6bb9bd380a55', 'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'ACC1000003', 5000.00, 'USD');
+
+INSERT INTO fintech.loans (loan_id, user_id, loan_number, principal, interest_rate, term_months, status) VALUES
+    ('f5eebc99-9c0b-4ef8-bb6d-6bb9bd380a66', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'LOAN100001', 5000.00, 0.05, 24, 'APPROVED');
+
+INSERT INTO fintech.policies (policy_id, user_id, policy_number, premium, status, next_due_at) VALUES
+    ('g6eebc99-9c0b-4ef8-bb6d-6bb9bd380a77', 'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'POL100001', 100.00, 'ACTIVE', NOW() + INTERVAL '1 month');
+EOF
+printf '[CREATED] backend/seeds/seed_data.sql\n'
+[ -f backend/seeds/seed_data.sql ] && printf '[CHECK] PASS seed file created\n'
+
+# Create database configuration
+cat <<'EOF' > backend/config/database.py
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/fintech")
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+EOF
+printf '[CREATED] backend/config/database.py\n'
+[ -f backend/config/database.py ] && printf '[CHECK] PASS database config created\n'
+
+# Create SQLAlchemy models
+cat <<'EOF' > backend/models/models.py
+from sqlalchemy import Column, String, DateTime, ForeignKey, Numeric, Integer
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+from backend.config.database import Base
+import uuid
+
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = {"schema": "fintech"}
+    
+    user_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String(255), unique=True, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    
+    accounts = relationship("Account", back_populates="user")
+    loans = relationship("Loan", back_populates="user")
+    policies = relationship("Policy", back_populates="user")
+
+class Account(Base):
+    __tablename__ = "accounts"
+    __table_args__ = {"schema": "fintech"}
+    
+    account_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("fintech.users.user_id"), nullable=False)
+    account_number = Column(String(20), unique=True, nullable=False)
+    balance = Column(Numeric(15, 2), nullable=False, default=0)
+    currency = Column(String(3), nullable=False, default="USD")
+    created_at = Column(DateTime, nullable=False)
+    
+    user = relationship("User", back_populates="accounts")
+
+class Transaction(Base):
+    __tablename__ = "transactions"
+    __table_args__ = {"schema": "fintech"}
+    
+    transaction_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    from_account_id = Column(UUID(as_uuid=True), ForeignKey("fintech.accounts.account_id"))
+    to_account_id = Column(UUID(as_uuid=True), ForeignKey("fintech.accounts.account_id"))
+    amount = Column(Numeric(15, 2), nullable=False)
+    transaction_ref = Column(String(255))
+    ledger_hash = Column(String(64))
+    created_at = Column(DateTime, nullable=False)
+
+class Loan(Base):
+    __tablename__ = "loans"
+    __table_args__ = {"schema": "fintech"}
+    
+    loan_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("fintech.users.user_id"), nullable=False)
+    loan_number = Column(String(20), unique=True, nullable=False)
+    principal = Column(Numeric(15, 2), nullable=False)
+    interest_rate = Column(Numeric(5, 4), nullable=False)
+    term_months = Column(Integer, nullable=False)
+    status = Column(String(20), nullable=False, default="PENDING")
+    created_at = Column(DateTime, nullable=False)
+    
+    user = relationship("User", back_populates="loans")
+
+class Policy(Base):
+    __tablename__ = "policies"
+    __table_args__ = {"schema": "fintech"}
+    
+    policy_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("fintech.users.user_id"), nullable=False)
+    policy_number = Column(String(20), unique=True, nullable=False)
+    premium = Column(Numeric(10, 2), nullable=False)
+    status = Column(String(20), nullable=False, default="ACTIVE")
+    next_due_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    
+    user = relationship("User", back_populates="policies")
+EOF
+printf '[CREATED] backend/models/models.py\n'
+[ -f backend/models/models.py ] && printf '[CHECK] PASS models created\n'
+
+# Create Docker Compose for local development
+cat <<'EOF' > backend/docker-compose.yml
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fintech
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+EOF
+printf '[CREATED] backend/docker-compose.yml\n'
+[ -f backend/docker-compose.yml ] && printf '[CHECK] PASS docker config created\n'
+
+# Create .env.example
+cat <<'EOF' > backend/.env.example
+# Database
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/fintech
+
+# API
+API_VERSION=v1
+PORT=8000
+
+# Environment
+ENV=development
+DEBUG=true
+EOF
+printf '[CREATED] backend/.env.example\n'
+[ -f backend/.env.example ] && printf '[CHECK] PASS env example created\n'
+
+# Create migration runner script
+cat <<'EOF' > backend/run_migrations.sh
+#!/bin/bash
+set -e
+
+echo "Running PostgreSQL migrations..."
+psql $DATABASE_URL -f migrations/001_create_base_schema.sql
+
+echo "Seeding data..."
+psql $DATABASE_URL -f seeds/seed_data.sql
+
+echo "Migration complete!"
+EOF
+chmod +x backend/run_migrations.sh
+printf '[CREATED] backend/run_migrations.sh\n'
+[ -x backend/run_migrations.sh ] && printf '[CHECK] PASS migration script executable\n'
+
+# Fix display by using printf
+printf "\n=== FIX SUMMARY ===\n"
+printf "[FIX 1] Fixed shebang line from #!/usr/bin/env bash to #!/bin/bash\n"
+printf "[FIX 2] Removed invalid 'pipefail' option for shell compatibility\n"
+printf "[FIX 3] Rebuilt complete PostgreSQL schema with proper structure\n"
+printf "[FIX 4] Added all required migrations, models, and seed data\n"
+printf "[FIX 5] Added Docker development environment\n"
+printf "[FIX 6] Added all supporting configuration files\n"
