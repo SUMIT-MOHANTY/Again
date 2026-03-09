@@ -1,0 +1,727 @@
+function() {
+  var config = {
+    apiBaseUrl: 'http://localhost:8000',
+    wireMockBaseUrl: 'http://localhost:8089',
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  };
+  
+  // Environment-specific overrides
+  var env = karate.env;
+  karate.log('karate.env system property was:', env);
+  
+  if (env === 'local') {
+    // Use local WireMock
+  } else if (env === 'ci') {
+    config.apiBaseUrl = 'http://api:8000';
+    config.wireMockBaseUrl = 'http://wiremock:8089';
+  }
+  
+  return config;
+}
+EOF
+
+# Create auth.feature
+cat <<'EOF' > backend/tests/karate/features/auth.feature
+Feature: Authentication and User Management
+
+  Background:
+    * url apiBaseUrl
+    * def authHeaders = { 'Content-Type': 'application/json' }
+
+  Scenario: Successful login
+    Given path 'api/v1/auth/login'
+    And request { email: 'test@example.com', password_hash: 'hashed_password_123' }
+    When method post
+    Then status 200
+    And match response.status == 'success'
+    And match response.data.access_token == '#string'
+    And match response.data.user.email == 'test@example.com'
+    And match response.trace_id == '#string'
+
+  Scenario: Invalid credentials
+    Given path 'api/v1/auth/login'
+    And request { email: 'test@example.com', password_hash: 'wrong_password' }
+    When method post
+    Then status 401
+    And match response.status == 'error'
+    And match response.detail == '#string'
+
+  Scenario: Get current user
+    Given path 'api/v1/auth/login'
+    And request { email: 'test@example.com', password_hash: 'hashed_password_123' }
+    When method post
+    Then status 200
+    * def accessToken = response.data.access_token
+    
+    Given path 'api/v1/users/me'
+    And header Authorization = 'Bearer ' + accessToken
+    When method get
+    Then status 200
+    And match response.status == 'success'
+    And match response.data.email == 'test@example.com'
+    And match response.trace_id == '#string'
+EOF
+
+# Create transfers.feature
+cat <<'EOF' > backend/tests/karate/features/transfers.feature
+Feature: Money Transfer Operations
+
+  Background:
+    * url apiBaseUrl
+    * def authHeaders = { 'Content-Type': 'application/json' }
+    # Login and get token
+    Given path 'api/v1/auth/login'
+    And request { email: 'test@example.com', password_hash: 'hashed_password_123' }
+    When method post
+    Then status 200
+    * def accessToken = response.data.access_token
+    * def authHeaders = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken }
+
+  Scenario: Successful transfer
+    Given path 'api/v1/transfers'
+    And headers authHeaders
+    And request { source_account_id: 'acc-123', target_account_id: 'acc-456', amount: 100.50, currency: 'USD' }
+    When method post
+    Then status 200
+    And match response.status == 'success'
+    And match response.data.source_account_id == 'acc-123'
+    And match response.data.target_account_id == 'acc-456'
+    And match response.data.amount == 100.50
+    And match response.data.status == 'pending'
+    And match response.trace_id == '#string'
+
+  Scenario: Transfer insufficient funds
+    Given path 'api/v1/transfers'
+    And headers authHeaders
+    And request { source_account_id: 'acc-789', target_account_id: 'acc-456', amount: 10000, currency: 'USD' }
+    When method post
+    Then status 400
+    And match response.status == 'error'
+    And match response.detail == '#string'
+
+  Scenario: Get transfer details
+    Given path 'api/v1/transfers/transfer-123'
+    And headers authHeaders
+    When method get
+    Then status 200
+    And match response.status == 'success'
+    And match response.data.id == 'transfer-123'
+    And match response.trace_id == '#string'
+EOF
+
+# Create loans.feature
+cat <<'EOF' > backend/tests/karate/features/loans.feature
+Feature: Loan Management
+
+  Background:
+    * url apiBaseUrl
+    * def authHeaders = { 'Content-Type': 'application/json' }
+    # Login and get token
+    Given path 'api/v1/auth/login'
+    And request { email: 'test@example.com', password_hash: 'hashed_password_123' }
+    When method post
+    Then status 200
+    * def accessToken = response.data.access_token
+    * def authHeaders = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken }
+
+  Scenario: Create loan application
+    Given path 'api/v1/loans'
+    And headers authHeaders
+    And request { amount: 5000, interest_rate: 5.5, term_months: 24 }
+    When method post
+    Then status 200
+    And match response.status == 'success'
+    And match response.data.amount == 5000
+    And match response.data.status == 'pending'
+    And match response.trace_id == '#string'
+    * def loanId = response.data.id
+
+  Scenario: Approve loan
+    * def loanId = 'loan-123'
+    Given path 'api/v1/loans/', loanId, '/approve'
+    And headers authHeaders
+    And request { approved: true, history: [{ by: 'admin@example.com', note: 'Approved based on credit score' }] }
+    When method patch
+    Then status 200
+    And match response.status == 'success'
+    And match response.data.status == 'approved'
+    And match response.trace_id == '#string'
+
+  Scenario: Disburse loan
+    * def loanId = 'loan-123'
+    Given path 'api/v1/loans/', loanId, '/disburse'
+    And headers authHeaders
+    When method patch
+    Then status 200
+    And match response.status == 'success'
+    And match response.data.status == 'disbursed'
+    And match response.data.disbursement_date == '#string'
+    And match response.trace_id == '#string'
+
+  Scenario: Loan already disbursed
+    * def loanId = 'loan-disbursed'
+    Given path 'api/v1/loans/', loanId, '/approve'
+    And headers authHeaders
+    And request { approved: true, history: [{ by: 'admin@example.com', note: 'Re-approval attempt' }] }
+    When method patch
+    Then status 409
+    And match response.status == 'error'
+    And match response.detail == '#string'
+EOF
+
+# Create claims.feature
+cat <<'EOF' > backend/tests/karate/features/claims.feature
+Feature: Insurance Claims
+
+  Background:
+    * url apiBaseUrl
+    * def authHeaders = { 'Content-Type': 'application/json' }
+    # Login and get token
+    Given path 'api/v1/auth/login'
+    And request { email: 'test@example.com', password_hash: 'hashed_password_123' }
+    When method post
+    Then status 200
+    * def accessToken = response.data.access_token
+    * def authHeaders = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken }
+
+  Scenario: Submit insurance claim
+    Given path 'api/v1/claims'
+    And headers authHeaders
+    And request { policy_id: 'policy-123', incident_dt: '2024-01-15', incident_amount: 2500.00, description: 'Vehicle collision' }
+    When method post
+    Then status 200
+    And match response.status == 'success'
+    And match response.data.policy_id == 'policy-123'
+    And match response.data.incident_amount == 2500.00
+    And match response.data.status == 'pending'
+    And match response.trace_id == '#string'
+    * def claimId = response.data.id
+
+  Scenario: Approve claim
+    * def claimId = 'claim-123'
+    Given path 'api/v1/claims/', claimId, '/approve'
+    And headers authHeaders
+    And request { note: 'Approved after investigation' }
+    When method patch
+    Then status 200
+    And match response.status == 'success'
+    And match response.data.status == 'approved'
+    And match response.trace_id == '#string'
+
+  Scenario: Reject claim
+    * def claimId = 'claim-456'
+    Given path 'api/v1/claims/', claimId, '/reject'
+    And headers authHeaders
+    And request { reason: 'Insufficient evidence provided' }
+    When method patch
+    Then status 200
+    And match response.status == 'success'
+    And match response.data.status == 'rejected'
+    And match response.trace_id == '#string'
+
+  Scenario: Pay claim
+    * def claimId = 'claim-789'
+    Given path 'api/v1/claims/', claimId, '/pay'
+    And headers authHeaders
+    And request { amount: 2500.00 }
+    When method patch
+    Then status 200
+    And match response.status == 'success'
+    And match response.data.status == 'paid'
+    And match response.data.payout_amount == 2500.00
+    And match response.trace_id == '#string'
+EOF
+
+# Create wiremock.json
+cat <<'EOF' > backend/tests/karate/mocks/wiremock.json
+{
+  "mappings": [
+    {
+      "request": {
+        "method": "POST",
+        "urlPattern": "/api/v1/auth/login",
+        "bodyPatterns": [
+          {
+            "matchesJsonPath": "$.email"
+          }
+        ]
+      },
+      "response": {
+        "status": 200,
+        "jsonBody": {
+          "status": "success",
+          "data": {
+            "access_token": "mock-jwt-token",
+            "user": {
+              "id": "user-123",
+              "email": "test@example.com",
+              "full_name": "Test User"
+            }
+          },
+          "trace_id": "550e8400-e29b-41d4-a716-446655440000"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPattern": "/api/v1/users/me"
+      },
+      "response": {
+        "status": 200,
+        "jsonBody": {
+          "status": "success",
+          "data": {
+            "id": "user-123",
+            "email": "test@example.com",
+            "full_name": "Test User"
+          },
+          "trace_id": "550e8400-e29b-41d4-a716-446655440001"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "urlPattern": "/api/v1/transfers"
+      },
+      "response": {
+        "status": 200,
+        "jsonBody": {
+          "status": "success",
+          "data": {
+            "id": "transfer-123",
+            "source_account_id": "{{jsonPath request.body '$.source_account_id'}}",
+            "target_account_id": "{{jsonPath request.body '$.target_account_id'}}",
+            "amount": "{{jsonPath request.body '$.amount'}}",
+            "currency": "{{jsonPath request.body '$.currency'}}",
+            "status": "pending"
+          },
+          "trace_id": "550e8400-e29b-41d4-a716-446655440002"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "urlPattern": "/api/v1/loans"
+      },
+      "response": {
+        "status": 200,
+        "jsonBody": {
+          "status": "success",
+          "data": {
+            "id": "loan-123",
+            "amount": "{{jsonPath request.body '$.amount'}}",
+            "interest_rate": "{{jsonPath request.body '$.interest_rate'}}",
+            "term_months": "{{jsonPath request.body '$.term_months'}}",
+            "status": "pending"
+          },
+          "trace_id": "550e8400-e29b-41d4-a716-446655440003"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "urlPattern": "/api/v1/claims"
+      },
+      "response": {
+        "status": 200,
+        "jsonBody": {
+          "status": "success",
+          "data": {
+            "id": "claim-123",
+            "policy_id": "{{jsonPath request.body '$.policy_id'}}",
+            "incident_dt": "{{jsonPath request.body '$.incident_dt'}}",
+            "incident_amount": "{{jsonPath request.body '$.incident_amount'}}",
+            "description": "{{jsonPath request.body '$.description'}}",
+            "status": "pending"
+          },
+          "trace_id": "550e8400-e29b-41d4-a716-446655440004"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+# Create cypress.config.ts
+cat <<'EOF' > frontend/cypress/cypress.config.ts
+import { defineConfig } from 'cypress'
+
+export default defineConfig({
+  e2e: {
+    baseUrl: 'http://localhost:5173',
+    supportFile: 'cypress/support/e2e.ts',
+    specPattern: 'cypress/e2e/**/*.cy.ts',
+    video: false,
+    screenshot: false,
+    viewportWidth: 1280,
+    viewportHeight: 720,
+    defaultCommandTimeout: 10000,
+    requestTimeout: 10000,
+    responseTimeout: 10000,
+    retries: {
+      runMode: 2,
+      openMode: 0
+    }
+  }
+})
+EOF
+
+# Create support/e2e.ts
+cat <<'EOF' > frontend/cypress/support/e2e.ts
+import './commands'
+
+Cypress.on('uncaught:exception', (err, runnable) => {
+  return false
+})
+
+beforeEach(() => {
+  cy.intercept('POST', '/api/v1/auth/login', {
+    statusCode: 200,
+    body: {
+      status: 'success',
+      data: {
+        access_token: 'mock-token',
+        user: {
+          id: 'user-123',
+          email: 'test@user.com',
+          full_name: 'Test User'
+        }
+      },
+      trace_id: 'mock-trace-id'
+    }
+  }).as('login')
+
+  cy.intercept('GET', '/api/v1/users/me', {
+    statusCode: 200,
+    body: {
+      status: 'success',
+      data: {
+        id: 'user-123',
+        email: 'test@user.com',
+        full_name: 'Test User'
+      },
+      trace_id: 'mock-trace-id'
+    }
+  }).as('getCurrentUser')
+})
+EOF
+
+# Create support/commands.ts
+cat <<'EOF' > frontend/cypress/support/commands.ts
+declare global {
+  namespace Cypress {
+    interface Chainable {
+      login(): Chainable<void>
+      createTransfer(data: any): Chainable<void>
+      createLoan(data: any): Chainable<void>
+      createClaim(data: any): Chainable<void>
+    }
+  }
+}
+
+Cypress.Commands.add('login', () => {
+  cy.visit('/login')
+  cy.get('[data-cy=email-input]').type('test@user.com')
+  cy.get('[data-cy=password-input]').type('Test123!')
+  cy.get('[data-cy=login-button]').click()
+  cy.wait('@login')
+})
+
+Cypress.Commands.add('createTransfer', (data) => {
+  cy.visit('/banking/transfers/new')
+  cy.get('[data-cy=source-account]').select(data.source_account_id)
+  cy.get('[data-cy=target-account]').type(data.target_account_id)
+  cy.get('[data-cy=amount]').type(data.amount)
+  cy.get('[data-cy=currency]').select(data.currency)
+  cy.get('[data-cy=submit-transfer]').click()
+})
+
+Cypress.Commands.add('createLoan', (data) => {
+  cy.visit('/banking/loans/new')
+  cy.get('[data-cy=loan-amount]').type(data.amount)
+  cy.get('[data-cy=interest-rate]').type(data.interest_rate)
+  cy.get('[data-cy=term-months]').type(data.term_months)
+  cy.get('[data-cy=submit-loan]').click()
+})
+
+Cypress.Commands.add('createClaim', (data) => {
+  cy.visit('/insurance/claims/new')
+  cy.get('[data-cy=policy-id]').select(data.policy_id)
+  cy.get('[data-cy=incident-date]').type(data.incident_dt)
+  cy.get('[data-cy=incident-amount]').type(data.incident_amount)
+  cy.get('[data-cy=description]').type(data.description)
+  cy.get('[data-cy=submit-claim]').click()
+})
+EOF
+
+# Create transfer.cy.ts
+cat <<'EOF' > frontend/cypress/e2e/transfer.cy.ts
+describe('Money Transfer Flow', () => {
+  beforeEach(() => {
+    cy.login()
+    cy.intercept('POST', '/api/v1/transfers', {
+      statusCode: 200,
+      body: {
+        status: 'success',
+        data: {
+          id: 'transfer-123',
+          source_account_id: 'acc-123',
+          target_account_id: 'acc-456',
+          amount: 100,
+          currency: 'USD',
+          status: 'pending'
+        },
+        trace_id: 'mock-trace-id'
+      }
+    }).as('createTransfer')
+  })
+
+  it('creates a successful transfer', () => {
+    cy.visit('/banking/transfers')
+    cy.get('[data-cy=new-transfer-button]').click()
+    
+    cy.get('[data-cy=source-account]').select('acc-123')
+    cy.get('[data-cy=target-account]').type('acc-456')
+    cy.get('[data-cy=amount]').type('100')
+    cy.get('[data-cy=currency]').select('USD')
+    cy.get('[data-cy=description]').type('Test transfer')
+    
+    cy.get('[data-cy=submit-transfer]').click()
+    
+    cy.wait('@createTransfer')
+    cy.contains('Transfer submitted successfully').should('be.visible')
+    cy.url().should('include', '/banking/transfers')
+  })
+
+  it('shows error for insufficient funds', () => {
+    cy.intercept('POST', '/api/v1/transfers', {
+      statusCode: 400,
+      body: {
+        status: 'error',
+        detail: 'Insufficient funds',
+        trace_id: 'mock-trace-id'
+      }
+    }).as('transferError')
+    
+    cy.createTransfer({
+      source_account_id: 'acc-123',
+      target_account_id: 'acc-456',
+      amount: 10000,
+      currency: 'USD'
+    })
+    
+    cy.wait('@transferError')
+    cy.contains('Insufficient funds').should('be.visible')
+  })
+})
+EOF
+
+# Create loan.cy.ts
+cat <<'EOF' > frontend/cypress/e2e/loan.cy.ts
+describe('Loan Application Flow', () => {
+  beforeEach(() => {
+    cy.login()
+    cy.intercept('POST', '/api/v1/loans', {
+      statusCode: 200,
+      body: {
+        status: 'success',
+        data: {
+          id: 'loan-123',
+          amount: 5000,
+          interest_rate: 5.5,
+          term_months: 24,
+          status: 'pending'
+        },
+        trace_id: 'mock-trace-id'
+      }
+    }).as('createLoan')
+  })
+
+  it('submits new loan application', () => {
+    cy.visit('/banking/loans')
+    cy.get('[data-cy=apply-loan-button]').click()
+    
+    cy.get('h1').should('contain', 'Apply for a Loan')
+    cy.get('[data-cy=loan-amount]').type('5000')
+    cy.get('[data-cy=interest-rate]').should('have.value', '5.5')
+    cy.get('[data-cy=term-months]').type('24')
+    cy.get('[data-cy=loan-purpose]').type('Home improvement')
+    
+    cy.get('[data-cy=submit-loan]').click()
+    
+    cy.wait('@createLoan')
+    cy.contains('Thank you for your application').should('be.visible')
+    cy.url().should('include', '/banking/loans')
+
+    cy.get('[data-cy=loan-status]').should('contain', 'pending')
+  })
+
+  it('displays loan approval notification', () => {
+    cy.visit('/banking/loans/loan-123')
+    
+    cy.intercept('PATCH', '/api/v1/loans/loan-123/approve', {
+      statusCode: 200,
+      body: {
+        status: 'success',
+        data: {
+          id: 'loan-123',
+          status: 'approved'
+        },
+        trace_id: 'mock-trace-id'
+      }
+    }).as('approveLoan')
+    
+    cy.get('[data-cy=approve-loan-button]').click()
+    cy.wait('@approveLoan')
+    cy.get('[data-cy=loan-status]').should('contain', 'approved')
+  })
+})
+EOF
+
+# Create claim.cy.ts
+cat <<'EOF' > frontend/cypress/e2e/claim.cy.ts
+describe('Insurance Claim Flow', () => {
+  beforeEach(() => {
+    cy.login()
+    cy.intercept('POST', '/api/v1/claims', {
+      statusCode: 200,
+      body: {
+        status: 'success',
+        data: {
+          id: 'claim-123',
+          policy_id: 'policy-123',
+          incident_dt: '2024-01-15',
+          incident_amount: 2500.00,
+          description: 'Vehicle collision',
+          status: 'pending'
+        },
+        trace_id: 'mock-trace-id'
+      }
+    }).as('createClaim')
+  })
+
+  it('files new insurance claim', () => {
+    cy.visit('/insurance/claims')
+    cy.get('[data-cy=file-claim-button]').click()
+    
+    cy.get('h1').should('contain', 'File a New Claim')
+    cy.get('[data-cy=policy-id]').select('Policy 123')
+    cy.get('[data-cy=incident-date]').type('2024-01-15')
+    cy.get('[data-cy=incident-amount]').type('2500')
+    cy.get('[data-cy=description]').type('Vehicle collision at intersection')
+    cy.get('[data-cy=documents-upload]').selectFile('cypress/fixtures/test-reports/sample-report.pdf')
+    
+    cy.get('[data-cy=submit-claim]').click()
+    
+    cy.wait('@createClaim')
+    cy.contains('Claim submitted successfully').should('be.visible')
+    cy.url().should('include', '/insurance/claims')
+  })
+
+  it('updates claim status to approved', () => {
+    cy.visit('/insurance/claims/claim-123')
+    
+    cy.intercept('PATCH', '/api/v1/claims/claim-123/approve', {
+      statusCode: 200,
+      body: {
+        status: 'success',
+        data: {
+          id: 'claim-123',
+          status: 'approved'
+        },
+        trace_id: 'mock-trace-id'
+      }
+    }).as('approveClaim')
+    
+    cy.get('[data-cy=approve-claim-button]').click()
+    cy.wait('@approveClaim')
+    cy.get('[data-cy=claim-status]').should('contain', 'approved')
+  })
+
+  it('processes claim payout', () => {
+    cy.visit('/insurance/claims/claim-123')
+    
+    cy.intercept('PATCH', '/api/v1/claims/claim-123/pay', {
+      statusCode: 200,
+      body: {
+        status: 'success',
+        data: {
+          id: 'claim-123',
+          status: 'paid',
+          payout_amount: 2500.00
+        },
+        trace_id: 'mock-trace-id'
+      }
+    }).as('payClaim')
+    
+    cy.get('[data-cy=payout-amount]').type('2500')
+    cy.get('[data-cy=process-payment-button]').click()
+    
+    cy.wait('@payClaim')
+    cy.get('[data-cy=claim-status]').should('contain', 'paid')
+    cy.contains('Payment processed successfully').should('be.visible')
+  })
+})
+EOF
+
+# Create sample test report file
+cat <<'EOF' > frontend/cypress/fixtures/test-reports/sample-report.pdf
+%PDF-1.4
+1 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+
+2 0 obj
+<<
+/Type /Pages
+/Kids [3 0 R]
+/Count 1
+>>
+endobj
+
+3 0 obj
+<<
+/Type /Page
+/Parent 2 0 R
+/MediaBox [0 0 612 792]
+/Contents 4 0 R
+>>
+endobj
+
+4 0 obj
+<<
+/Length 44
+>>
+stream
+BT
+/F1 12 Tf
+72 720 Td
+(Test Insurance Report)Tj
+ET
+endstream
+endobj
+
+xref
+0 5
+0000000000 65535 f
+0000000009 00000 n
+0000000058 00000 n
+0000000115 00000 n
+0000000192 00000 n
+trailer
+<<
+/Size 5
+/Root 1 0 R
+>>
+startxref
+288
+%%EOF
