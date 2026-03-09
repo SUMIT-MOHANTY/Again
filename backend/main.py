@@ -1,12 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.api.router import router
+import uvicorn
+from backend.api.router import router as general_router
+from backend.api.routers.users import router as users_router
+from backend.api.routers.insurance import router as insurance_router
+from backend.api.routers.claims import router as claims_router
 from backend.data.models import Base
 from backend.data.database import engine
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Insurance Products API")
+app = FastAPI(title="Insurance Platform API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,8 +20,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(router, prefix="/api/v1")
+app.include_router(general_router, prefix="/api/v1")
+app.include_router(users_router, prefix="/api")
+app.include_router(insurance_router, prefix="/api")
+app.include_router(claims_router, prefix="/api")
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
