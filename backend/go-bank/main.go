@@ -1,0 +1,249 @@
+package main
+
+import (
+    "log"
+    "net/http"
+    "backend/go-bank/handlers"
+)
+
+func main() {
+    http.HandleFunc("/api/v1/accounts", handlers.GetAccounts)
+    http.HandleFunc("/api/v1/transfers", handlers.PostTransfer)
+    http.HandleFunc("/api/v1/loans", handlers.PostLoan)
+    log.Fatal(http.ListenAndServe(":8080", nil))
+}
+EOF
+printf "[CREATED] backend/go-bank/main.go "
+
+cat <<'EOF' > backend/go-bank/handlers/accounts.go
+package handlers
+
+import (
+    "encoding/json"
+    "net/http"
+)
+
+func GetAccounts(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    
+    accounts := []map[string]interface{}{
+        {
+            "account_id":    "acc_123",
+            "user_id":      "user_456",
+            "account_number": "1234567890",
+            "balance":      1500.50,
+            "currency":     "USD",
+            "created_at":   "2024-01-15T10:30:00Z",
+        },
+    }
+    
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(accounts)
+}
+EOF
+printf "[CREATED] backend/go-bank/handlers/accounts.go "
+
+cat <<'EOF' > backend/go-bank/handlers/transfers.go
+package handlers
+
+import (
+    "encoding/json"
+    "net/http"
+)
+
+func PostTransfer(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    
+    var body map[string]interface{}
+    if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+        http.Error(w, "Invalid JSON", http.StatusBadRequest)
+        return
+    }
+    
+    response := map[string]interface{}{
+        "transaction_id": "txn_789",
+        "ledger_hash":    "0xabc123def456",
+    }
+    
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(response)
+}
+EOF
+printf "[CREATED] backend/go-bank/handlers/transfers.go "
+
+cat <<'EOF' > backend/go-bank/handlers/loans.go
+package handlers
+
+import (
+    "encoding/json"
+    "net/http"
+)
+
+func PostLoan(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    
+    var body map[string]interface{}
+    if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+        http.Error(w, "Invalid JSON", http.StatusBadRequest)
+        return
+    }
+    
+    response := map[string]interface{}{
+        "loan_id":     "loan_321",
+        "loan_number": "LN-2024-0001",
+        "status":      "PENDING",
+    }
+    
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(response)
+}
+EOF
+printf "[CREATED] backend/go-bank/handlers/loans.go "
+
+cat <<'EOF' > backend/go-bank/go.mod
+module backend/go-bank
+
+go 1.21
+EOF
+printf "[CREATED] backend/go-bank/go.mod "
+
+printf "[FIX 4] Create insurance service placeholder for micro-service alignment\n"
+mkdir -p backend/go-insur/{handlers,models}
+cat <<'EOF' > backend/go-insur/main.go
+package main
+
+import (
+    "encoding/json"
+    "log"
+    "net/http"
+)
+
+func GetPolicies(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    
+    policies := []map[string]interface{}{
+        {
+            "policy_id": "pol_111",
+            "user_id": "user_456",
+            "policy_number": "POL-2024-0001",
+            "premium": 100.00,
+            "status": "ACTIVE",
+            "next_due_at": "2024-03-01T00:00:00Z",
+        },
+    }
+    
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(policies)
+}
+
+func main() {
+    http.HandleFunc("/api/v1/policies", GetPolicies)
+    log.Fatal(http.ListenAndServe(":8081", nil))
+}
+EOF
+printf "[CREATED] backend/go-insur/main.go "
+
+printf "[FIX 5] Create ledger & dashboard service placeholders\n"
+mkdir -p backend/go-ledger backend/go-dash
+
+cat <<'EOF' > backend/go-ledger/main.go
+package main
+
+import "fmt"
+
+func main() { fmt.Println("Ledger service starting on :8082") }
+EOF
+printf "[CREATED] backend/go-ledger/main.go "
+
+cat <<'EOF' > backend/go-dash/main.go
+package main
+
+import "fmt"
+
+func main() { fmt.Println("Dashboard service starting on :8083") }
+EOF
+printf "[CREATED] backend/go-dash/main.go "
+
+printf "[FIX 6] Create Dockerfiles for containerization\n"
+cat <<'EOF' > backend/go-bank/Dockerfile
+FROM golang:1.21-alpine AS builder
+WORKDIR /app
+COPY go.mod ./
+RUN go mod tidy
+COPY . .
+RUN go build -o go-bank .
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/go-bank .
+EXPOSE 8080
+CMD ["./go-bank"]
+EOF
+printf "[CREATED] backend/go-bank/Dockerfile "
+
+cat <<'EOF' > backend/go-insur/Dockerfile
+FROM golang:1.21-alpine AS builder
+WORKDIR /app
+COPY . .
+RUN go build -o go-insur .
+
+FROM alpine:latest
+COPY --from=builder /app/go-insur /go-insur
+EXPOSE 8081
+CMD ["/go-insur"]
+EOF
+printf "[CREATED] backend/go-insur/Dockerfile "
+
+printf "[FIX 7] Create Makefile for development commands\n"
+cat <<'EOF' > backend/Makefile
+.PHONY: build-bank build-insur up down
+
+build-bank:
+	cd go-bank && go build -o go-bank .
+
+build-insur:
+	cd go-insur && go build -o go-insur .
+
+up:
+	cd go-bank && ./go-bank &
+	cd go-insur && ./go-insur &
+
+down:
+	pkill go-bank || true
+	pkill go-insur || true
+EOF
+printf "[CREATED] backend/Makefile "
+
+printf "[CHECK] Check Go syntax for all .go files\n"
+find backend -name "*.go" -exec gofmt -e {} \; > /dev/null && printf "[CHECK] PASS Go formatting\n"
+
+printf "[CHECK] Validate Dockerfile existence\n"
+test -f backend/go-bank/Dockerfile && printf "[CHECK] PASS backend/go-bank/Dockerfile\n"
+test -f backend/go-insur/Dockerfile && printf "[CHECK] PASS backend/go-insur/Dockerfile\n"
+
+printf "[CHECK] Verify directory structure\n"
+ls backend/go-{bank,insur,ledger,dash}/ >/dev/null 2>&1 && printf "[CHECK] PASS micro-service structure\n"
+
+printf "=== FIX SUMMARY ===\n"
+printf "1. Fixed shell pipefail error\n"
+printf "2. Created banking service skeleton (go-bank)\n"
+printf "3. Created insurance service placeholder (go-insur)\n"
+printf "4. Created ledger & dashboard placeholders\n"
+printf "5. Added Dockerfiles for containerization\n"
+printf "6. Added Makefile for development commands\n"
+printf "Total fixes applied: 7\n"
