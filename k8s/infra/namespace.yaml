@@ -1,0 +1,122 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: infra
+  labels:
+    name: infra
+EOF
+printf '[CREATED] k8s/infra/namespace.yaml\n'
+
+[FIX 5] Create auth namespace
+cat <<'EOF' > k8s/auth/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: auth
+  labels:
+    name: auth
+EOF
+printf '[CREATED] k8s/auth/namespace.yaml\n'
+
+[FIX 6] Create microservice namespaces
+for ns in banking insurance ledger dashboard; do
+cat <<EOF > k8s/${ns}/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${ns}
+  labels:
+    name: ${ns}
+EOF
+done
+printf '[CREATED] microservice namespace manifests\n'
+
+[FIX 7] Create basic Kong deployment
+cat <<'EOF' > k8s/infra/kong-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong-gateway
+  namespace: infra
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kong
+  template:
+    metadata:
+      labels:
+        app: kong
+    spec:
+      containers:
+      - name: kong
+        image: kong:latest
+        ports:
+        - containerPort: 8000
+        - containerPort: 8001
+        env:
+        - name: KONG_DATABASE
+          value: "off"
+        - name: KONG_PROXY_ACCESS_LOG
+          value: "/dev/stdout"
+EOF
+printf '[CREATED] k8s/infra/kong-deployment.yaml\n'
+
+[FIX 8] Create backend service structure
+mkdir -p backend/banking backend/insurance backend/ledger backend/dashboard
+cat <<'EOF' > backend/banking/main.py
+from flask import Flask, jsonify
+app = Flask(__name__)
+
+@app.route('/api/v1/accounts')
+def list_accounts():
+    return jsonify([{
+        "account_id": "acc_123",
+        "user_id": "usr_456",
+        "account_number": "1234567890",
+        "balance": 1500.00,
+        "currency": "USD",
+        "created_at": "2024-01-01T00:00:00Z"
+    }])
+EOF
+printf '[CREATED] backend/banking/main.py\n'
+
+[FIX 9] Create backend insurance service
+cat <<'EOF' > backend/insurance/main.py
+from flask import Flask, jsonify
+app = Flask(__name__)
+
+@app.route('/api/v1/policies')
+def list_policies():
+    return jsonify([{
+        "policy_id": "pol_789",
+        "user_id": "usr_456",
+        "policy_number": "P123456",
+        "premium": 250.00,
+        "status": "active",
+        "next_due_at": "2024-02-01T00:00:00Z"
+    }])
+EOF
+printf '[CREATED] backend/insurance/main.py\n'
+
+[FIX 10] Validate file integrity
+for f in backend/*/main.py; do
+    grep -q Flask $f && printf '[CHECK] PASS %s\n' $f || printf '[CHECK] FAIL %s\n' $f
+done
+
+grep -q "name: infra" k8s/infra/namespace.yaml && printf '[CHECK] PASS namespace manifests\n'
+
+[FIX 11] Create deployment script
+cat <<'EOF' > deploy.sh
+#!/bin/bash
+set -e
+echo "Deploying namespaces..."
+kubectl apply -f k8s/*/namespace.yaml
+kubectl get namespaces | grep -E "(infra|auth|banking|insurance|ledger|dashboard)"
+echo "Deploy complete"
+EOF
+chmod +x deploy.sh
+printf '[CREATED] deploy.sh\n'
+
+=== FIX SUMMARY ===
+Fixed shell syntax error, created missing Kubernetes namespaces, established backend service structure, and added deployment scaffolding
