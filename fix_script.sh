@@ -1,0 +1,287 @@
+#!/bin/sh
+set -e
+echo "Starting fixes..."
+EOF
+chmod +x /workspace/fix_script.sh
+printf '[FIX 1] Fixed bash shebang and removed pipefail option\n'
+
+# [FIX 2] Create missing service directories
+mkdir -p backend/go-bank/src backend/go-insur/src backend/go-ledger/src backend/go-dash/src
+mkdir -p backend/k8s/banking backend/k8s/insurance backend/k8s/ledger backend/k8s/dashboard
+printf '[FIX 2] Created service directories\n'
+
+# [FIX 3] Create Kong Gateway configuration
+cat <<'EOF' > backend/k8s/kong/gateway-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-gateway-config
+  namespace: infra
+data:
+  kong.conf: |
+    database = off
+    declarative_config = /kong/declarative/kong.yml
+    nginx_worker_processes = auto
+    proxy_access_log = /dev/stdout
+    admin_access_log = /dev/stdout
+    admin_listen = 0.0.0.0:8001
+    proxy_listen = 0.0.0.0:8000
+EOF
+printf '[FIX 3] Created Kong Gateway configuration\n'
+
+# [FIX 4] Create Keycloak realm configuration
+cat <<'EOF' > backend/k8s/keycloak/realm-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm-config
+  namespace: auth
+data:
+  realm.json: |
+    {
+      "realm": "fintech-platform",
+      "enabled": true,
+      "clients": [
+        {
+          "clientId": "kong-gateway",
+          "enabled": true,
+          "publicClient": false,
+          "secret": "kong-client-secret",
+          "redirectUris": ["https://kong.example.com/*"],
+          "webOrigins": ["+"]
+        }
+      ]
+    }
+EOF
+printf '[FIX 4] Created Keycloak realm configuration\n'
+
+# [FIX 5] Create PostgreSQL database schemas
+cat <<'EOF' > backend/postgres/banking-schema.sql
+CREATE SCHEMA IF NOT EXISTS banking;
+
+CREATE TABLE IF NOT EXISTS banking.accounts (
+    account_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    account_number VARCHAR(20) UNIQUE NOT NULL,
+    balance DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS banking.transactions (
+    transaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    from_account_id UUID REFERENCES banking.accounts(account_id),
+    to_account_id UUID REFERENCES banking.accounts(account_id),
+    amount DECIMAL(15,2) NOT NULL,
+    transaction_ref VARCHAR(255),
+    ledger_hash VARCHAR(64),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+EOF
+printf '[FIX 5] Created banking schema\n'
+
+# [FIX 6] Create insurance service schema
+cat <<'EOF' > backend/postgres/insurance-schema.sql
+CREATE SCHEMA IF NOT EXISTS insurance;
+
+CREATE TABLE IF NOT EXISTS insurance.policies (
+    policy_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    policy_number VARCHAR(50) UNIQUE NOT NULL,
+    premium DECIMAL(10,2) NOT NULL,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('ACTIVE', 'CANCELLED', 'PENDING')),
+    next_due_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+EOF
+printf '[FIX 6] Created insurance schema\n'
+
+# [FIX 7] Create ledger service configuration
+cat <<'EOF' > backend/go-ledger/config/ledger-config.yaml
+ledger:
+  hyperledger:
+    network_config:
+      channel: "fintech-channel"
+      chaincode: "fintech-ledger"
+    connection:
+      peer_url: "peer0.org1.example.com:7051"
+      orderer_url: "orderer.example.com:7050"
+  kafka:
+    brokers:
+      - "kafka-broker-1:9092"
+      - "kafka-broker-2:9092"
+    consumer_group: "ledger-service-group"
+EOF
+printf '[FIX 7] Created ledger configuration\n'
+
+# [FIX 8] Create background job configuration
+cat <<'EOF' > backend/jobs/premium-deduction.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: premium-deduction
+  namespace: jobs
+spec:
+  schedule: "0 2 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: premium-deduction
+            image: node:16-alpine
+            command: ["/bin/sh"]
+            args:
+            - -c
+            - |
+              node /app/premium-deduction.js
+            env:
+            - name: LEDGER_API_URL
+              value: "http://go-ledger-service:8080"
+          restartPolicy: OnFailure
+EOF
+printf '[FIX 8] Created premium deduction job\n'
+
+# [FIX 9] Create basic Dockerfiles for services
+cat <<'EOF' > backend/go-bank/Dockerfile
+FROM golang:1.21-alpine AS builder
+WORKDIR /app
+COPY src/ .
+RUN go mod tidy && go build -o banking-service
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/banking-service .
+CMD ["./banking-service"]
+EOF
+printf '[FIX 9] Created banking service Dockerfile\n'
+
+# [FIX 10] Create Kubernetes manifests for banking service
+cat <<'EOF' > backend/k8s/banking/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-bank
+  namespace: banking
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: go-bank
+  template:
+    metadata:
+      labels:
+        app: go-bank
+    spec:
+      containers:
+      - name: go-bank
+        image: go-bank:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DB_CONNECTION
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: connection-string
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-bank-service
+  namespace: banking
+spec:
+  selector:
+    app: go-bank
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: ClusterIP
+EOF
+printf '[FIX 10] Created banking service K8s manifest\n'
+
+# [FIX 11] Create Kong declarative configuration
+cat <<'EOF' > backend/k8s/kong/declarative/kong.yml
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: banking-service
+    url: http://go-bank-service.banking.svc.cluster.local
+    routes:
+      - name: banking
+        paths:
+          - /banking
+  - name: insurance-service
+    url: http://go-insur-service.insurance.svc.cluster.local
+    routes:
+      - name: insurance
+        paths:
+          - /insurance
+  - name: ledger-service
+    url: http://go-ledger-service.ledger.svc.cluster.local
+    routes:
+      - name: ledger
+        paths:
+          - /ledger
+
+plugins:
+  - name: rate-limiting
+    config:
+      minute: 100
+  - name: oidc
+    config:
+      client_id: "kong-gateway"
+      client_secret: "kong-client-secret"
+      discovery: "http://keycloak.auth.svc.cluster.local:8080/auth/realms/fintech-platform/.well-known/openid-configuration"
+EOF
+printf '[FIX 11] Created Kong declarative configuration\n'
+
+# [FIX 12] Validate critical files exist
+test -f backend/k8s/kong/gateway-config.yaml && printf '[CHECK] PASS Kong config\n'
+test -f backend/postgres/banking-schema.sql && printf '[CHECK] PASS banking schema\n'
+test -f backend/go-bank/Dockerfile && printf '[CHECK] PASS banking Dockerfile\n'
+test -f backend/k8s/banking/deployment.yaml && printf '[CHECK] PASS banking K8s manifest\n'
+
+# [FIX 13] Create overall architecture diagram
+cat <<'EOF' > /workspace/ARCHITECTURE.md
+# Fintech Platform Architecture
+
+## System Overview
+- **Kong Gateway**: Entry point for all API requests
+- **Keycloak**: OIDC provider for authentication/authorization
+- **Microservices**: banking, insurance, ledger, dashboard
+- **Data Layer**: PostgreSQL (core data) + Hyperledger Fabric (immutable ledger)
+- **Background Jobs**: premium-deduction cron job
+- **Monitoring**: Prometheus + Grafana, ELK stack
+
+## Service Boundaries
+- banking: Account management, transfers, loans
+- insurance: Policy management and enrollment
+- ledger: Immutable transaction records
+- dashboard: Operations/admin endpoints
+EOF
+printf '[FIX 13] Created architecture documentation\n'
+
+# [FIX 14] Create environment template
+cat <<'EOF' > /workspace/.env.example
+# Database
+POSTGRES_HOST=postgres-cluster.default.svc.cluster.local
+POSTGRES_PORT=5432
+POSTGRES_DB=fintech_platform
+POSTGRES_USER=fintech_user
+
+# Keycloak
+KEYCLOAK_URL=http://keycloak.auth.svc.cluster.local:8080
+KEYCLOAK_REALM=fintech-platform
+KEYCLOAK_CLIENT_ID=kong-gateway
+
+# Kafka
+KAFKA_BROKERS=kafka-broker-1:9092,kafka-broker-2:9092
+EOF
+printf '[FIX 14] Created environment template\n'
+
+printf '=== FIX SUMMARY ===\n'
+printf 'Applied 14 fixes successfully\n'
+exit 0
