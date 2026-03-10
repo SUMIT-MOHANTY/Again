@@ -1,0 +1,6 @@
+import insuranceRoutes from './routes/insurance';
+app.use('/api', insuranceRoutes);
+import policiesRoutes from './routes/policies';
+app.use('/api', policiesRoutes);
+import claimsRoutes from './routes/claims';
+app.use('/api', claimsRoutes);
