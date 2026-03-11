@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: banking-service
+  namespace: banking
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: banking-service
+  template:
+    metadata:
+      labels:
+        app: banking-service
+    spec:
+      containers:
+      - name: banking
+        image: fintech/banking:latest
+        ports:
+        - containerPort: 5000
+        env:
+        - name: POSTGRES_HOST
+          value: "postgres.fintech.svc.cluster.local"
+        - name: POSTGRES_DB
+          value: "fintech"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: password
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: banking-service
+  namespace: banking
+spec:
+  selector:
+    app: banking-service
+  ports:
+  - port: 80
+    targetPort: 5000
+  type: ClusterIP
