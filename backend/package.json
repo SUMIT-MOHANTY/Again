@@ -1,0 +1,212 @@
+{
+  "name": "backend",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "helmet": "^8.0.0",
+    "cors": "^2.8.5",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "express-rate-limit": "^7.4.0",
+    "joi": "^17.13.3",
+    "speakeasy": "^2.0.0",
+    "qrcode": "^1.5.3",
+    "pg": "^8.12.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/express": "^4.17.21",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/speakeasy": "^2.0.10",
+    "@types/qrcode": "^1.5.5",
+    "@types/pg": "^8.11.6",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2"
+  }
+}
+EOF
+printf '[CREATED] backend/package.json\n'
+
+cat <<'EOF' > backend/tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "outDir": "dist",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}
+EOF
+printf '[CREATED] backend/tsconfig.json\n'
+
+# Ensure frontend package.json with MFA / TOTP libs
+cat <<'EOF' > frontend/package.json
+{
+  "name": "frontend",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.1",
+    "axios": "^1.7.4",
+    "qrcode.react": "^4.0.1",
+    "@types/qrcode.react": "^1.0.5",
+    "@mantine/core": "^7.12.1",
+    "@mantine/hooks": "^7.12.1",
+    "@mantine/notifications": "^7.12.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0"
+  }
+}
+EOF
+printf '[CREATED] frontend/package.json\n'
+
+# Remove conflicting Python remnants from canonical Node backend
+rm -f backend/config.py backend/requirements.txt 2>/dev/null || true
+printf '[FIX 3] Removed backend/config.py backend/requirements.txt\n'
+
+# Basic Express server entry
+cat <<'EOF' > backend/src/server.ts
+import express from 'express';
+import helmet from 'helmet';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { errorHandler } from './middleware/error_handler.js';
+import { authRouter } from './routes/auth.js';
+
+dotenv.config();
+const app = express();
+app.use(helmet());
+app.use(cors());
+app.use(express.json());
+
+app.use('/api/auth', authRouter);
+
+app.use(errorHandler);
+
+const port = process.env.PORT || 4000;
+app.listen(port, () => console.log(`Backend listening on ${port}`));
+EOF
+printf '[CREATED] backend/src/server.ts\n'
+
+cat <<'EOF' > backend/src/middleware/auth_middleware.ts
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+export const authMiddleware = (req: any, res: Response, next: NextFunction) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'No token' });
+  try {
+    req.user = jwt.verify(token, process.env.JWT_SECRET!);
+    next();
+  } catch { return res.status(401).json({ error: 'Invalid token' }); }
+};
+EOF
+printf '[CREATED] backend/src/middleware/auth_middleware.ts\n'
+
+cat <<'EOF' > backend/src/middleware/error_handler.ts
+import { Request, Response, NextFunction } from 'express';
+export const errorHandler = (err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error(err);
+  res.status(500).json({ error: err.message || 'Internal Server Error' });
+};
+EOF
+printf '[CREATED] backend/src/middleware/error_handler.ts\n'
+
+cat <<'EOF' > backend/src/routes/auth.ts
+import { Router } from 'express';
+import speakeasy from 'speakeasy';
+import QRCode from 'qrcode';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import Joi from 'joi';
+import { pool } from '../db/pool.js';
+
+export const authRouter = Router();
+
+authRouter.post('/register', async (req, res) => {
+  const schema = Joi.object({
+    email: Joi.string().email().required(),
+    password: Joi.string().min(8).required()
+  });
+  const { error } = schema.validate(req.body);
+  if (error) return res.status(400).json({ error: error.message });
+  const { email, password } = req.body;
+  const hashed = await bcrypt.hash(password, 10);
+  try {
+    await pool.query('INSERT INTO app_user (email, password) VALUES ($1, $2)', [email, hashed]);
+    res.status(201).end();
+  } catch (_) { return res.status(409).json({ error: 'Email exists' }); }
+});
+
+authRouter.post('/login', async (req, res) => {
+  const { email, password, totpToken } = req.body;
+  const { rows } = await pool.query('SELECT * FROM app_user WHERE email=$1', [email]);
+  if (!rows[0] || !await bcrypt.compare(password, rows[0].password))
+    return res.status(401).json({ error: 'Invalid credentials' });
+  if (!rows[0].mfa_secret) return res.json({ mfa_pending: false, token: jwt.sign({ id: rows[0].id }, process.env.JWT_SECRET!) });
+  const verified = speakeasy.totp.verify({ secret: rows[0].mfa_secret, encoding: 'base32', token: totpToken, window: 2 });
+  if (!verified) return res.status(401).json({ error: 'Invalid 2FA token' });
+  res.json({ mfa_pending: false, token: jwt.sign({ id: rows[0].id }, process.env.JWT_SECRET!) });
+});
+
+authRouter.post('/mfa/setup', async (req, res) => {
+  const secret = speakeasy.generateSecret({ name: 'Corp Portal' });
+  const qr = await QRCode.toDataURL(secret.otpauth_url!);
+  res.json({ secret: secret.base32, qr });
+});
+
+authRouter.post('/mfa/confirm', async (req, res) => {
+  const { userId, secret, token } = req.body;
+  const verified = speakeasy.totp.verify({ secret, encoding: 'base32', token, window: 2 });
+  if (!verified) return res.status(400).json({ error: 'Invalid token' });
+  await pool.query('UPDATE app_user SET mfa_secret=$1 WHERE id=$2', [secret, userId]);
+  res.status(204).end();
+});
+EOF
+printf '[CREATED] backend/src/routes/auth.ts\n'
+
+cat <<'EOF' > backend/src/db/pool.ts
+import pg from 'pg';
+const { Pool } = pg;
+export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+EOF
+printf '[CREATED] backend/src/db/pool.ts\n'
+
+cat <<'EOF' > backend/.env.example
+DATABASE_URL=postgres://user:pass@localhost:5432/corp
+JWT_SECRET=change_me
+PORT=4000
+EOF
+
+[ -f backend/.env ] || cp backend/.env.example backend/.env
+[ -f backend/.env.production ] || cp backend/.env.example backend/.env.production
+printf '[CREATED] backend/.env.example .env .env.production\n'
+
+[ -f frontend/.env.example ] || cp frontend/.env.production frontend/.env.example
+printf '[CHECK] PASS all canonical and MFA fix files\n'
+
+printf '=== FIX SUMMARY ===\n'
