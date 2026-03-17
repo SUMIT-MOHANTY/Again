@@ -1,0 +1,28 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: fintech
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5433:5432"
+  gateway:
+    build: ./backend/gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      - banking-service
+      - insurance-service
+  banking-service:
+    build: ./backend/banking-service
+    ports:
+      - "8081:8080"
+  insurance-service:
+    build: ./backend/insurance-service
+    ports:
+      - "8082:8080"
+  ledger-service:
+    build: ./backend/ledger-service
+    ports:
+      - "8083:8080"

@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "dd-trace": "^3.16.0",
+    "hot-shots": "^9.3.0"
+  }
+}
