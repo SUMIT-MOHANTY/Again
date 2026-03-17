@@ -1,0 +1,175 @@
+# CI/CD monitoring integration for the calculator application
+# This pipeline configuration adds monitoring steps to the build process
+
+name: Monitoring Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  DD_API_KEY: ${{ secrets.DD_API_KEY }}
+  DD_APP_KEY: ${{ secrets.DD_APP_KEY }}
+  DD_ENV: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+  DD_SERVICE: calculator
+  DD_VERSION: ${{ github.sha }}
+
+jobs:
+  # Job to validate monitoring configuration
+  validate-monitoring:
+    name: Validate Monitoring Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Validate Monitoring Config
+        run: |
+          node -e "
+            const config = require('./monitoring/config.js');
+            const metrics = require('./monitoring/metrics.js');
+
+            // Ensure required config properties exist
+            if (!config.datadog || !config.datadog.serviceName) {
+              console.error('Invalid monitoring configuration');
+              process.exit(1);
+            }
+
+            // Ensure metrics are properly defined
+            if (!metrics.metrics || !metrics.thresholds) {
+              console.error('Invalid metrics configuration');
+              process.exit(1);
+            }
+
+            console.log('Monitoring configuration validated successfully');
+          "
+
+  # Job to run monitoring tests
+  monitoring-tests:
+    name: Monitoring Tests
+    runs-on: ubuntu-latest
+    needs: validate-monitoring
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Monitoring Tests
+        run: |
+          # Test frontend monitoring
+          echo "Testing frontend monitoring integration..."
+          npx ts-node -e "
+            import * as path from 'path';
+            import * as fs from 'fs';
+
+            const monitoringPath = path.join(process.cwd(), 'frontend/src/utils/monitoring.ts');
+            if (!fs.existsSync(monitoringPath)) {
+              console.error('Frontend monitoring file missing');
+              process.exit(1);
+            }
+
+            console.log('Frontend monitoring file exists');
+          "
+
+          # Test backend monitoring
+          echo "Testing backend monitoring integration..."
+          npx ts-node -e "
+            import * as path from 'path';
+            import * as fs from 'fs';
+
+            const monitoringPath = path.join(process.cwd(), 'backend/src/middleware/monitoring.ts');
+            if (!fs.existsSync(monitoringPath)) {
+              console.error('Backend monitoring file missing');
+              process.exit(1);
+            }
+
+            console.log('Backend monitoring file exists');
+          "
+
+  # Job to notify Datadog about deployment
+  notify-datadog:
+    name: Notify Datadog About Deployment
+    runs-on: ubuntu-latest
+    needs: [validate-monitoring, monitoring-tests]
+    if: success() && github.event_name == 'push'
+    steps:
+      - name: Notify Datadog About Deployment
+        run: |
+          DEPLOY_INFO=$(cat <<EOF
+          {
+            "api_key": "$DD_API_KEY",
+            "app_key": "$DD_APP_KEY",
+            "title": "Deployment of calculator application $DD_VERSION",
+            "text": "Deployed calculator application to $DD_ENV environment",
+            "date_happened": $(date +%s),
+            "priority": "normal",
+            "tags": ["environment:$DD_ENV", "service:$DD_SERVICE", "version:$DD_VERSION"],
+            "alert_type": "info",
+            "source_type_name": "github"
+          }
+          EOF
+          )
+
+          curl -X POST "https://api.datadoghq.com/api/v1/events" \
+            -H "Content-Type: application/json" \
+            -d "$DEPLOY_INFO"
+
+      - name: Create Datadog Service Check
+        run: |
+          curl -X POST "https://api.datadoghq.com/api/v1/service_check" \
+            -H "Content-Type: application/json" \
+            -H "DD-API-KEY: $DD_API_KEY" \
+            -d "{
+              \"check\": \"application.deployed\",
+              \"host_name\": \"github-ci\",
+              \"status\": 0,
+              \"tags\": [\"environment:$DD_ENV\", \"service:$DD_SERVICE\", \"version:$DD_VERSION\"]
+            }"
+
+  # Job to verify monitoring is working
+  verify-monitoring:
+    name: Verify Monitoring Setup
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: notify-datadog
+    steps:
+      - name: Wait For Monitoring Data
+        run: sleep 60  # Wait for metrics to appear
+
+      - name: Verify Datadog Is Receiving Metrics
+        run: |
+          # Query Datadog API to ensure metrics are being received
+          from=$(date -d '5 minutes ago' +%s)
+          to=$(date +%s)
+
+          response=$(curl -s -G \
+            "https://api.datadoghq.com/api/v1/metrics" \
+            -H "DD-API-KEY: $DD_API_KEY" \
+            -H "DD-APPLICATION-KEY: $DD_APP_KEY" \
+            --data-urlencode "from=$from" \
+            --data-urlencode "to=$to")
+
+          echo "Checking metrics response..."
+          if echo "$response" | grep -q "calculator"; then
+            echo " Monitoring is working correctly!"
+          else
+            echo " No calculator metrics found in Datadog"
+            exit 1
+          fi
